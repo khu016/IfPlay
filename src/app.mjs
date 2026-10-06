@@ -4,6 +4,7 @@ import { cp, readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { AppError, errorBody } from './lib/errors.mjs';
 import { generateGame } from './lib/generator.mjs';
+import { planGame } from './lib/planner.mjs';
 import { TaskQueue } from './lib/queue.mjs';
 import { ProjectStore } from './lib/store.mjs';
 
@@ -148,6 +149,8 @@ export async function createIfPlayApp(options = {}) {
   const dataDir = options.dataDir ?? process.env.IFPLAY_DATA_DIR ?? '.data';
   const store = new ProjectStore(dataDir);
   await store.init();
+  const planner = options.planner ?? planGame;
+  const planningProjects = new Set();
   const concurrency = Number(options.concurrency ?? process.env.IFPLAY_MAX_CONCURRENT_TASKS ?? 2);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 2) {
     throw new Error('IFPLAY_MAX_CONCURRENT_TASKS 必须是 1 或 2');
@@ -207,6 +210,49 @@ export async function createIfPlayApp(options = {}) {
       if (request.method === 'GET' && projectMatch) {
         const project = store.authorizeProject(projectMatch[1], token(request));
         return sendJson(response, 200, { project: store.publicProject(project) });
+      }
+
+      const planningMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/planning$/);
+      if (request.method === 'GET' && planningMatch) {
+        const project = store.authorizeProject(planningMatch[1], token(request));
+        return sendJson(response, 200, { planning: project.planning });
+      }
+
+      if (request.method === 'POST' && planningMatch) {
+        const project = store.authorizeProject(planningMatch[1], token(request));
+        if (planningProjects.has(project.id)) {
+          throw new AppError('PLANNING_BUSY', 'AI 正在整理玩法，请稍后再试。', 409);
+        }
+        planningProjects.add(project.id);
+        try {
+          const body = await readJson(request);
+          const answer = typeof body.answer === 'string' ? body.answer.trim() : '';
+          let planning = store.getPlanning(project.id);
+          if (planning.status === 'proposal_ready') {
+            if (answer) throw new AppError('PLANNING_ALREADY_COMPLETE', '三个玩法提案已经生成。', 409);
+            return sendJson(response, 200, { planning });
+          }
+          if (planning.pendingQuestion) {
+            if (!answer) return sendJson(response, 200, { planning });
+            if (answer.length > 1000) {
+              throw new AppError('PLANNING_ANSWER_INVALID', '回答不能超过 1000 个字符。');
+            }
+            planning = await store.answerPlanningQuestion(project.id, answer);
+          } else if (answer) {
+            throw new AppError('PLANNING_ANSWER_UNEXPECTED', '当前没有等待回答的玩法问题。', 409);
+          }
+
+          const result = await planner({
+            idea: project.idea,
+            clarifications: planning.clarifications,
+            questionCount: planning.clarifications.length,
+            mustPropose: planning.clarifications.length >= 3,
+          });
+          planning = await store.savePlanningResult(project.id, result);
+          return sendJson(response, 200, { planning });
+        } finally {
+          planningProjects.delete(project.id);
+        }
       }
 
       const generationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/generations$/);

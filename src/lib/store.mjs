@@ -49,6 +49,14 @@ export class ProjectStore {
       status: 'draft',
       currentVersionId: null,
       nextVersionNumber: 1,
+      planning: {
+        status: 'not_started',
+        clarifications: [],
+        pendingQuestion: null,
+        proposals: [],
+        provider: null,
+        updatedAt: createdAt,
+      },
       createdAt,
       updatedAt: createdAt,
     };
@@ -61,6 +69,16 @@ export class ProjectStore {
   getProject(id) {
     const project = this.state.projects[id];
     if (!project) throw new AppError('PROJECT_NOT_FOUND', '项目不存在。', 404);
+    if (!project.planning) {
+      project.planning = {
+        status: 'not_started',
+        clarifications: [],
+        pendingQuestion: null,
+        proposals: [],
+        provider: null,
+        updatedAt: project.updatedAt ?? now(),
+      };
+    }
     return project;
   }
 
@@ -77,6 +95,54 @@ export class ProjectStore {
   publicProject(project) {
     const { tokenHash: ignored, ...safeProject } = project;
     return safeProject;
+  }
+
+  getPlanning(projectId) {
+    return this.getProject(projectId).planning;
+  }
+
+  async answerPlanningQuestion(projectId, answer) {
+    const project = this.getProject(projectId);
+    const planning = project.planning;
+    if (!planning.pendingQuestion) {
+      throw new AppError('PLANNING_ANSWER_UNEXPECTED', '当前没有等待回答的玩法问题。', 409);
+    }
+    const answeredAt = now();
+    planning.clarifications.push({
+      questionId: planning.pendingQuestion.id,
+      question: planning.pendingQuestion.text,
+      answer,
+      answeredAt,
+    });
+    planning.pendingQuestion = null;
+    planning.status = 'clarifying';
+    planning.updatedAt = answeredAt;
+    project.status = 'clarifying';
+    project.updatedAt = answeredAt;
+    await this.persist();
+    return planning;
+  }
+
+  async savePlanningResult(projectId, result) {
+    const project = this.getProject(projectId);
+    const planning = project.planning;
+    const updatedAt = now();
+    if (result.kind === 'question') {
+      planning.status = 'clarifying';
+      planning.pendingQuestion = result.question;
+      planning.proposals = [];
+      project.status = 'clarifying';
+    } else {
+      planning.status = 'proposal_ready';
+      planning.pendingQuestion = null;
+      planning.proposals = result.proposals;
+      project.status = 'proposal_ready';
+    }
+    planning.provider = result.provider ?? null;
+    planning.updatedAt = updatedAt;
+    project.updatedAt = updatedAt;
+    await this.persist();
+    return planning;
   }
 
   async createTask(projectId, kind, instruction) {

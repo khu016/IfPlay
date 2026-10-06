@@ -4,16 +4,160 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createIfPlayApp } from '../src/app.mjs';
+import { normalizePlannerResult } from '../src/lib/planner.mjs';
 import { ProjectStore } from '../src/lib/store.mjs';
 
-async function startApp() {
+async function startApp(options = {}) {
   process.env.IFPLAY_GENERATOR_MODE = 'demo';
   const dataDir = await mkdtemp(path.join(tmpdir(), 'ifplay-test-'));
-  const app = await createIfPlayApp({ dataDir });
+  const app = await createIfPlayApp({ dataDir, ...options });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const address = app.server.address();
   return { ...app, baseUrl: `http://127.0.0.1:${address.port}` };
 }
+
+function proposal(name, action, pace = 'balanced') {
+  return {
+    name,
+    oneLiner: `${action}，完成一局短小但完整的游戏。`,
+    playerRole: '纸飞机驾驶者',
+    goal: `通过${action}获得足够星光`,
+    coreLoop: [`观察${action}目标`, `执行${action}`, '获得反馈并继续'],
+    controls: '方向键或触控拖动',
+    successCondition: `两分钟内完成${action}目标`,
+    failureCondition: `连续三次错过${action}目标`,
+    sessionLengthMinutes: 2,
+    pace,
+    visualDirection: '蓝紫色雨夜城市、清晰剪影和柔和霓虹光',
+    highlightMoment: `完成连续${action}时触发满屏星光`,
+    simplifications: ['首版只做一个场景'],
+    implementationRisk: 'low',
+  };
+}
+
+test('enforces the three-question limit and rejects duplicate gameplay proposals', () => {
+  assert.throws(
+    () => normalizePlannerResult({
+      kind: 'question',
+      question: { text: '还要继续问吗？', options: ['继续', '停止'] },
+    }, 3),
+    (error) => error.code === 'PLANNER_QUESTION_LIMIT',
+  );
+  const repeated = proposal('同一种玩法', '收集星光');
+  assert.throws(
+    () => normalizePlannerResult({ kind: 'proposals', proposals: [repeated, repeated, repeated] }, 0),
+    (error) => error.code === 'PLANNER_RESPONSE_INVALID',
+  );
+});
+
+test('asks one useful question and persists three structured gameplay proposals', async (t) => {
+  const plannerCalls = [];
+  const planner = async (input) => {
+    plannerCalls.push(input);
+    if (input.questionCount === 0) {
+      return {
+        kind: 'question',
+        question: {
+          id: 'question-1',
+          text: '你更想要放松探索，还是紧张挑战？',
+          options: ['放松探索', '紧张挑战', '两者平衡'],
+          allowFreeText: true,
+        },
+        provider: { model: 'test-planner', usage: null },
+      };
+    }
+    return {
+      kind: 'proposals',
+      proposals: [
+        { id: 'proposal-a', ...proposal('雨夜拾光', '自由收集', 'relaxed') },
+        { id: 'proposal-b', ...proposal('霓虹穿环', '节奏穿环', 'intense') },
+        { id: 'proposal-c', ...proposal('记忆航线', '路线选择', 'balanced') },
+      ],
+      provider: { model: 'test-planner', usage: { total_tokens: 123 } },
+    };
+  };
+  const app = await startApp({ planner });
+  t.after(() => app.server.close());
+  const created = await app.store.createProject('做一个雨夜收集星光的纸飞机游戏');
+  const headers = { 'content-type': 'application/json', 'x-project-token': created.token };
+
+  const firstResponse = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/planning`, {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  const first = await firstResponse.json();
+  assert.equal(firstResponse.status, 200);
+  assert.equal(first.planning.pendingQuestion.options.length, 3);
+  assert.equal(plannerCalls.length, 1);
+
+  const repeatedResponse = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/planning`, {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  assert.equal(repeatedResponse.status, 200);
+  assert.equal(plannerCalls.length, 1);
+
+  const proposalsResponse = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/planning`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ answer: '两者平衡' }),
+  });
+  const proposals = await proposalsResponse.json();
+  assert.equal(proposalsResponse.status, 200);
+  assert.equal(proposals.planning.status, 'proposal_ready');
+  assert.equal(proposals.planning.clarifications.length, 1);
+  assert.equal(proposals.planning.proposals.length, 3);
+  assert.equal(plannerCalls.length, 2);
+
+  const restoredResponse = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/planning`, {
+    headers: { 'x-project-token': created.token },
+  });
+  const restored = await restoredResponse.json();
+  assert.equal(restored.planning.proposals[1].name, '霓虹穿环');
+  assert.equal(restored.planning.provider.model, 'test-planner');
+});
+
+test('protects planning access and prevents concurrent planning calls', async (t) => {
+  let releasePlanner;
+  const planner = () => new Promise((resolve) => {
+    releasePlanner = () => resolve({
+      kind: 'question',
+      question: {
+        id: 'question-1',
+        text: '你希望游戏更偏向什么节奏？',
+        options: ['舒缓', '均衡', '紧张'],
+        allowFreeText: true,
+      },
+      provider: { model: 'test-planner', usage: null },
+    });
+  });
+  const app = await startApp({ planner });
+  t.after(() => app.server.close());
+  const created = await app.store.createProject('测试玩法策划并发保护');
+  const url = `${app.baseUrl}/api/projects/${created.project.id}/planning`;
+  const firstRequest = fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-project-token': created.token },
+    body: '{}',
+  });
+  while (!releasePlanner) await new Promise((resolve) => setTimeout(resolve, 1));
+  const busyResponse = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-project-token': created.token },
+    body: '{}',
+  });
+  assert.equal(busyResponse.status, 409);
+  assert.equal((await busyResponse.json()).error.code, 'PLANNING_BUSY');
+  releasePlanner();
+  assert.equal((await firstRequest).status, 200);
+
+  const deniedResponse = await fetch(url, {
+    headers: { 'x-project-token': 'wrong-token' },
+  });
+  assert.equal(deniedResponse.status, 403);
+});
 
 async function waitForTask(baseUrl, taskId, token) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
