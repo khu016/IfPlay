@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -107,6 +107,34 @@ test('returns typed errors and protects project access', async (t) => {
   });
   assert.equal(deniedResponse.status, 403);
   assert.equal((await deniedResponse.json()).error.code, 'PROJECT_ACCESS_DENIED');
+});
+
+test('inlines local scripts and styles for sandboxed previews', async (t) => {
+  const app = await startApp();
+  t.after(() => app.server.close());
+  const created = await app.store.createProject('测试多文件游戏预览');
+  const task = await app.store.createTask(created.project.id, 'initial', '生成多文件版本');
+  const outputDir = path.join(app.store.dataDir, 'projects', created.project.id, 'versions', 'v1');
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(
+    path.join(outputDir, 'index.html'),
+    '<link rel="stylesheet" href="style.css"><button id="play">开始</button><script src="game.js"></script>',
+  );
+  await writeFile(path.join(outputDir, 'style.css'), '#play{color:red}');
+  await writeFile(path.join(outputDir, 'game.js'), 'document.querySelector("#play").dataset.ready="true";');
+  await app.store.completeTask(task.id, {
+    generatorMode: 'opengame',
+    outputPath: path.join(outputDir, 'index.html'),
+  });
+
+  const response = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/preview`, {
+    headers: { 'x-project-token': created.token },
+  });
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(html, /<style data-ifplay-src="style\.css">#play\{color:red\}<\/style>/);
+  assert.match(html, /<script data-ifplay-src="game\.js">document\.querySelector/);
+  assert.doesNotMatch(html, /<script\s+src="game\.js"/);
 });
 
 test('keeps the last playable version when a later task fails', async () => {

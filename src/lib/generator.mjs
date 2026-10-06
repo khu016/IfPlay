@@ -39,13 +39,30 @@ async function generateWithOpenGame({ project, task, outputDir }) {
   await mkdir(outputDir, { recursive: true });
   const upstream = path.join(sourceRoot, 'vendor', 'opengame');
   const prompt = `${project.idea}\n\n修改或补充要求：${task.instruction}`;
+  const gameAssets = path.join(upstream, 'agent-test');
   await new Promise((resolve, reject) => {
     const child = spawn(
       'npm',
-      ['--prefix', upstream, 'run', 'start', '--', '-p', prompt, '--yolo'],
+      [
+        '--prefix',
+        upstream,
+        'run',
+        'start',
+        '--',
+        '-p',
+        prompt,
+        '--approval-mode',
+        'auto-edit',
+        '--telemetry=false',
+      ],
       {
         cwd: outputDir,
-        env: { ...process.env, QWEN_WORKING_DIR: outputDir },
+        env: {
+          ...process.env,
+          QWEN_WORKING_DIR: outputDir,
+          GAME_TEMPLATES_DIR: path.join(gameAssets, 'templates'),
+          GAME_DOCS_DIR: path.join(gameAssets, 'docs'),
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );

@@ -17,6 +17,54 @@ const staticFiles = new Map([
   ['/tokens.css', [path.join('..', 'tokens.css'), 'text/css; charset=utf-8']],
 ]);
 
+function isLocalAsset(reference) {
+  return !/^(?:[a-z]+:|\/\/|\/|#)/i.test(reference);
+}
+
+function resolveVersionAsset(versionRoot, reference) {
+  const resolved = path.resolve(versionRoot, reference.split(/[?#]/, 1)[0]);
+  if (resolved !== versionRoot && !resolved.startsWith(`${versionRoot}${path.sep}`)) {
+    throw new AppError('PREVIEW_ASSET_INVALID', '试玩资源路径越出了当前版本目录。', 422);
+  }
+  return resolved;
+}
+
+async function replaceAsync(value, expression, replacer) {
+  const matches = [...value.matchAll(expression)];
+  const replacements = await Promise.all(matches.map((match) => replacer(match)));
+  let cursor = 0;
+  let result = '';
+  matches.forEach((match, index) => {
+    result += value.slice(cursor, match.index) + replacements[index];
+    cursor = match.index + match[0].length;
+  });
+  return result + value.slice(cursor);
+}
+
+async function buildPreviewHtml(outputPath) {
+  const versionRoot = path.dirname(outputPath);
+  let html = await readFile(outputPath, 'utf8');
+  html = await replaceAsync(
+    html,
+    /<link\b([^>]*?)\bhref=["']([^"']+)["']([^>]*)>/gi,
+    async (match) => {
+      if (!/\brel=["']stylesheet["']/i.test(match[0]) || !isLocalAsset(match[2])) return match[0];
+      const css = await readFile(resolveVersionAsset(versionRoot, match[2]), 'utf8');
+      return `<style data-ifplay-src="${match[2]}">${css.replaceAll('</style', '<\\/style')}</style>`;
+    },
+  );
+  html = await replaceAsync(
+    html,
+    /<script\b([^>]*?)\bsrc=["']([^"']+)["']([^>]*)>\s*<\/script>/gi,
+    async (match) => {
+      if (!isLocalAsset(match[2])) return match[0];
+      const script = await readFile(resolveVersionAsset(versionRoot, match[2]), 'utf8');
+      return `<script data-ifplay-src="${match[2]}">${script.replaceAll('</script', '<\\/script')}</script>`;
+    },
+  );
+  return html;
+}
+
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -146,7 +194,7 @@ export async function createIfPlayApp(options = {}) {
         const project = store.authorizeProject(previewMatch[1], token(request));
         const version = store.listVersions(project.id).find((item) => item.id === project.currentVersionId);
         if (!version) throw new AppError('VERSION_NOT_READY', '项目还没有可试玩版本。', 409);
-        const html = await readFile(version.outputPath, 'utf8');
+        const html = await buildPreviewHtml(version.outputPath);
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         return response.end(html);
       }
