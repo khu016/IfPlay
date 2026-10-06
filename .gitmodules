@@ -1,0 +1,3 @@
+[submodule "vendor/opengame"]
+	path = vendor/opengame
+	url = https://github.com/leigest519/OpenGame.git
