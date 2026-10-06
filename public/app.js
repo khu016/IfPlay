@@ -144,8 +144,8 @@ async function loadPlayableVersion() {
     headers: { 'x-project-token': session.token },
   });
   if (!previewResponse.ok) throw new Error('试玩内容暂时无法打开。请重新生成。');
-  elements.gameFrame.srcdoc = await previewResponse.text();
   elements.gameFrame.hidden = false;
+  elements.gameFrame.srcdoc = await previewResponse.text();
   elements.emptyPreview.hidden = true;
 
   const { versions } = await api(`/api/projects/${session.projectId}/versions`);

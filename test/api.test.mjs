@@ -121,7 +121,12 @@ test('inlines local scripts and styles for sandboxed previews', async (t) => {
     '<link rel="stylesheet" href="style.css"><button id="play">开始</button><script src="game.js"></script>',
   );
   await writeFile(path.join(outputDir, 'style.css'), '#play{color:red}');
-  await writeFile(path.join(outputDir, 'game.js'), 'document.querySelector("#play").dataset.ready="true";');
+  await mkdir(path.join(outputDir, 'public', 'assets'), { recursive: true });
+  await writeFile(path.join(outputDir, 'public', 'assets', 'bg.png'), Buffer.from([137, 80, 78, 71]));
+  await writeFile(
+    path.join(outputDir, 'game.js'),
+    'document.querySelector("#play").dataset.ready="true";const bg="./public/assets/bg.png";',
+  );
   await app.store.completeTask(task.id, {
     generatorMode: 'opengame',
     outputPath: path.join(outputDir, 'index.html'),
@@ -134,6 +139,8 @@ test('inlines local scripts and styles for sandboxed previews', async (t) => {
   assert.equal(response.status, 200);
   assert.match(html, /<style data-ifplay-src="style\.css">#play\{color:red\}<\/style>/);
   assert.match(html, /<script data-ifplay-src="game\.js">document\.querySelector/);
+  assert.match(html, /data:image\/png;base64,iVBORw==/);
+  assert.doesNotMatch(html, /public\/assets\/bg\.png/);
   assert.doesNotMatch(html, /<script\s+src="game\.js"/);
 });
 

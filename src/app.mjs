@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { cp, readFile } from 'node:fs/promises';
+import { cp, readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { AppError, errorBody } from './lib/errors.mjs';
 import { generateGame } from './lib/generator.mjs';
@@ -41,6 +41,56 @@ async function replaceAsync(value, expression, replacer) {
   return result + value.slice(cursor);
 }
 
+const previewAssetTypes = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+  ['.woff', 'font/woff'],
+  ['.woff2', 'font/woff2'],
+]);
+
+async function collectPreviewAssets(directory, versionRoot, assets = []) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const absolutePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await collectPreviewAssets(absolutePath, versionRoot, assets);
+      continue;
+    }
+    const mimeType = previewAssetTypes.get(path.extname(entry.name).toLowerCase());
+    if (!mimeType) continue;
+    const body = await readFile(absolutePath);
+    if (body.length > 5 * 1024 * 1024) {
+      throw new AppError('PREVIEW_ASSET_TOO_LARGE', '单个试玩资源不能超过 5MB。', 422);
+    }
+    assets.push({
+      reference: path.relative(versionRoot, absolutePath).split(path.sep).join('/'),
+      dataUri: `data:${mimeType};base64,${body.toString('base64')}`,
+      size: body.length,
+    });
+  }
+  return assets;
+}
+
+async function inlinePreviewAssets(html, versionRoot) {
+  const assets = await collectPreviewAssets(versionRoot, versionRoot);
+  const totalSize = assets.reduce((sum, asset) => sum + asset.size, 0);
+  if (totalSize > 15 * 1024 * 1024) {
+    throw new AppError('PREVIEW_ASSETS_TOO_LARGE', '试玩资源总大小不能超过 15MB。', 422);
+  }
+  const replacements = assets
+    .flatMap((asset) => [
+      { reference: `./${asset.reference}`, dataUri: asset.dataUri },
+      { reference: asset.reference, dataUri: asset.dataUri },
+    ])
+    .sort((left, right) => right.reference.length - left.reference.length);
+  return replacements.reduce(
+    (result, asset) => result.replaceAll(asset.reference, asset.dataUri),
+    html,
+  );
+}
+
 async function buildPreviewHtml(outputPath) {
   const versionRoot = path.dirname(outputPath);
   let html = await readFile(outputPath, 'utf8');
@@ -62,7 +112,7 @@ async function buildPreviewHtml(outputPath) {
       return `<script data-ifplay-src="${match[2]}">${script.replaceAll('</script', '<\\/script')}</script>`;
     },
   );
-  return html;
+  return inlinePreviewAssets(html, versionRoot);
 }
 
 async function readJson(request) {
