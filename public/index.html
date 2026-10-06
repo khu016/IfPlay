@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="IfPlay，把一句游戏想法变成可以试玩的网页小游戏。" />
+    <title>IfPlay · 游戏创作台</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="nav-edge">
+      <a class="wordmark" href="/" aria-label="IfPlay 首页">
+        <span class="wordmark__mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        IfPlay
+      </a>
+      <div class="service-state" id="service-state" role="status">
+        <span class="service-state__dot" aria-hidden="true"></span>
+        <span>正在连接</span>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <section class="brief-pane reveal" style="--i: 0" aria-labelledby="page-title">
+        <div class="brief-pane__intro">
+          <p class="mode-label">游戏创作台</p>
+          <h1 id="page-title">先说你想<br />玩什么。</h1>
+          <p class="lede">不用写提示词。说清楚你想玩什么，我们先做出一版，再边玩边改。</p>
+        </div>
+
+        <form id="idea-form" class="idea-form" novalidate>
+          <label for="idea">你的游戏想法</label>
+          <textarea
+            id="idea"
+            name="idea"
+            rows="5"
+            minlength="4"
+            maxlength="2000"
+            placeholder="例如：做一个深夜便利店经营游戏，顾客会提出奇怪要求。"
+            required
+          ></textarea>
+          <p class="field-help" id="idea-help">写题材、玩家要做什么，或者只写一个你喜欢的画面。</p>
+          <div class="prompt-starters" aria-label="想法示例">
+            <button type="button" data-prompt="做一个深夜便利店经营游戏，顾客会提出奇怪要求。">深夜便利店</button>
+            <button type="button" data-prompt="做一个躲避雨滴、收集纸飞机的轻量闯关游戏。">雨中纸飞机</button>
+            <button type="button" data-prompt="做一个通过选择对话来经营太空电台的剧情游戏。">太空电台</button>
+          </div>
+          <button class="action action--primary" id="create-button" type="submit">
+            <span class="action__label">整理这个想法</span>
+            <span class="action__pending" aria-hidden="true">正在整理</span>
+          </button>
+        </form>
+
+        <section class="plan-card" id="plan-card" hidden aria-labelledby="plan-title">
+          <div class="plan-card__head">
+            <div>
+              <p class="mode-label">准备生成</p>
+              <h2 id="plan-title">先做一版能玩的</h2>
+            </div>
+            <button class="text-action" id="edit-idea-button" type="button">修改想法</button>
+          </div>
+          <p class="plan-card__idea" id="plan-idea"></p>
+          <dl class="plan-grid">
+            <div><dt>交付</dt><dd>浏览器小游戏</dd></div>
+            <div><dt>操作</dt><dd>鼠标与触控</dd></div>
+            <div><dt>版本</dt><dd>生成后可继续改</dd></div>
+          </dl>
+          <button class="action action--primary" id="generate-button" type="button">开始生成</button>
+        </section>
+
+        <section class="modify-panel" id="modify-panel" hidden aria-labelledby="modify-title">
+          <div>
+            <p class="mode-label">继续调整</p>
+            <h2 id="modify-title">哪里还不像你想的？</h2>
+          </div>
+          <form id="modify-form" novalidate>
+            <label for="instruction">修改要求</label>
+            <textarea
+              id="instruction"
+              name="instruction"
+              rows="3"
+              minlength="2"
+              maxlength="2000"
+              placeholder="例如：节奏慢一点，按钮更大，失败后可以马上重来。"
+              required
+            ></textarea>
+            <button class="action action--secondary" id="modify-button" type="submit">生成新版本</button>
+          </form>
+        </section>
+
+        <div class="message" id="message" role="alert" hidden></div>
+      </section>
+
+      <section class="preview-pane reveal" style="--i: 1" aria-labelledby="preview-title">
+        <header class="preview-pane__head">
+          <div>
+            <p class="mode-label">试玩区</p>
+            <h2 id="preview-title">你的游戏会出现在这里</h2>
+          </div>
+          <div class="task-state" id="task-state" hidden aria-live="polite">
+            <span class="task-state__spinner" aria-hidden="true"></span>
+            <span id="task-state-text">排队中</span>
+          </div>
+        </header>
+
+        <div class="preview-stage" id="preview-stage">
+          <div class="empty-preview" id="empty-preview">
+            <div class="game-seed" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <p>先在左边写下一个游戏想法。</p>
+            <small>第一版出来后，你可以直接试玩，再继续修改。</small>
+          </div>
+          <iframe id="game-frame" title="IfPlay 游戏试玩" sandbox="allow-scripts allow-pointer-lock" hidden></iframe>
+        </div>
+
+        <div class="version-strip" id="version-strip" hidden>
+          <span>当前版本</span>
+          <strong id="version-number">v1</strong>
+          <span id="generator-label">开发演示</span>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot-line">
+      <p>测试版 · 真实任务状态 · 最多同时生成 2 个游戏</p>
+      <a href="https://github.com/khu016/IfPlay" target="_blank" rel="noreferrer">查看源码</a>
+    </footer>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

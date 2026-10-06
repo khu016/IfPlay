@@ -31,6 +31,10 @@ test('creates a project, generates a playable version, and modifies it', async (
   const app = await startApp();
   t.after(() => app.server.close());
 
+  const pageResponse = await fetch(`${app.baseUrl}/`);
+  assert.equal(pageResponse.status, 200);
+  assert.match(await pageResponse.text(), /IfPlay · 游戏创作台/);
+
   const createdResponse = await fetch(`${app.baseUrl}/api/projects`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

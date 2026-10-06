@@ -1,10 +1,21 @@
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { cp, readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { AppError, errorBody } from './lib/errors.mjs';
 import { generateGame } from './lib/generator.mjs';
 import { TaskQueue } from './lib/queue.mjs';
 import { ProjectStore } from './lib/store.mjs';
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const publicRoot = path.join(projectRoot, 'public');
+
+const staticFiles = new Map([
+  ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/app.css', ['app.css', 'text/css; charset=utf-8']],
+  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/tokens.css', [path.join('..', 'tokens.css'), 'text/css; charset=utf-8']],
+]);
 
 async function readJson(request) {
   const chunks = [];
@@ -66,6 +77,16 @@ export async function createIfPlayApp(options = {}) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
+      if (request.method === 'GET' && staticFiles.has(url.pathname)) {
+        const [relativePath, contentType] = staticFiles.get(url.pathname);
+        const body = await readFile(path.resolve(publicRoot, relativePath));
+        response.writeHead(200, {
+          'content-type': contentType,
+          'cache-control': 'no-cache',
+          'x-content-type-options': 'nosniff',
+        });
+        return response.end(body);
+      }
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return sendJson(response, 200, {
           status: 'ok',
