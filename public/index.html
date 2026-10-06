@@ -24,7 +24,7 @@
         <div class="brief-pane__intro">
           <p class="mode-label">游戏创作台</p>
           <h1 id="page-title">先说你想<br />玩什么。</h1>
-          <p class="lede">不用写提示词。说清楚你想玩什么，我们先做出一版，再边玩边改。</p>
+          <p class="lede">不用写提示词。AI 会先帮你比较几种玩法，再把选中的方向做成游戏。</p>
         </div>
 
         <form id="idea-form" class="idea-form" novalidate>
@@ -50,21 +50,47 @@
           </button>
         </form>
 
+        <section class="question-panel" id="question-panel" hidden aria-labelledby="question-title">
+          <header class="question-panel__head">
+            <div>
+              <h2 id="question-title">先确认一个关键选择</h2>
+            </div>
+            <span class="step-count" id="question-count">问题 1 / 最多 3 个</span>
+          </header>
+          <p class="question-copy" id="question-copy"></p>
+          <div class="answer-options" id="answer-options" aria-label="可选回答"></div>
+          <form id="answer-form" class="answer-form" novalidate>
+            <label for="custom-answer">或者用自己的话回答</label>
+            <textarea
+              id="custom-answer"
+              name="custom-answer"
+              rows="2"
+              maxlength="1000"
+              placeholder="写下你更具体的想法"
+            ></textarea>
+            <button class="action action--secondary" id="answer-button" type="submit">提交回答</button>
+          </form>
+        </section>
+
         <section class="plan-card" id="plan-card" hidden aria-labelledby="plan-title">
           <div class="plan-card__head">
             <div>
-              <p class="mode-label">准备生成</p>
-              <h2 id="plan-title">先做一版能玩的</h2>
+              <p class="mode-label">已选玩法</p>
+              <h2 id="plan-title">准备生成</h2>
             </div>
-            <button class="text-action" id="edit-idea-button" type="button">修改想法</button>
+            <div class="plan-card__actions">
+              <button class="text-action" id="reselect-proposal-button" type="button">重新选择</button>
+              <button class="text-action" id="edit-idea-button" type="button">修改想法</button>
+            </div>
           </div>
           <p class="plan-card__idea" id="plan-idea"></p>
           <dl class="plan-grid">
-            <div><dt>交付</dt><dd>浏览器小游戏</dd></div>
-            <div><dt>操作</dt><dd>鼠标与触控</dd></div>
-            <div><dt>版本</dt><dd>生成后可继续改</dd></div>
+            <div><dt>目标</dt><dd id="plan-goal"></dd></div>
+            <div><dt>操作</dt><dd id="plan-controls"></dd></div>
+            <div><dt>单局</dt><dd id="plan-duration"></dd></div>
           </dl>
-          <button class="action action--primary" id="generate-button" type="button">开始生成</button>
+          <ul class="core-loop" id="plan-loop" aria-label="核心玩法循环"></ul>
+          <button class="action action--primary" id="generate-button" type="button">用这个玩法生成</button>
         </section>
 
         <section class="modify-panel" id="modify-panel" hidden aria-labelledby="modify-title">
@@ -101,6 +127,20 @@
             <span id="task-state-text">排队中</span>
           </div>
         </header>
+
+        <section class="proposal-board" id="proposal-board" hidden aria-labelledby="proposal-title">
+          <div class="proposal-board__intro">
+            <h3 id="proposal-title">选一个你真正想玩的方向</h3>
+            <p>先比较玩家一直在做什么、怎样成功，以及画面会是什么感觉。参考图将在下一步生成。</p>
+          </div>
+          <div class="proposal-list" id="proposal-list"></div>
+          <div class="proposal-board__actions">
+            <p id="proposal-selection-help">选择一个方向后继续。</p>
+            <button class="action action--primary" id="confirm-proposal-button" type="button" disabled>
+              确认这个方向
+            </button>
+          </div>
+        </section>
 
         <div class="preview-stage" id="preview-stage">
           <div class="empty-preview" id="empty-preview">

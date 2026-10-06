@@ -27,7 +27,7 @@ IfPlay 面向不会编程的普通用户和内容创作者。用户用中文描�
 - [x] 完成本地演示模式的端到端验收记录。
 - [x] 完成 DeepSeek + OpenGame 真实生成验收。
 - [x] 完成 DeepSeek 结构化玩法策划后端与真实接口验证。
-- [ ] 完成三个玩法提案的前端选择界面。
+- [x] 完成关键问题、三个玩法提案和选择恢复的前端界面。
 - [ ] 完成三分区参考风格板和玩法契约确认。
 
 项目状态见 [docs/项目状态.md](docs/项目状态.md)，完整需求见 [PRD-IfPlay-MVP-v1.0.md](PRD-IfPlay-MVP-v1.0.md)。
@@ -58,6 +58,8 @@ npm start
 默认页面地址是 `http://127.0.0.1:8787`，健康检查为 `GET /api/health`。默认使用明确标识的本地演示生成器，不会调用模型或产生模型费用。
 
 玩法策划接口为 `POST /api/projects/:id/planning`。第一次调用会返回一个关键问题或三个玩法提案；存在待回答问题时，在请求体中提交 `{ "answer": "用户回答" }`。`GET /api/projects/:id/planning` 可以恢复已保存的问答与提案。两个接口都需要项目凭证。
+
+提案选择接口为 `POST /api/projects/:id/planning/selection`，请求体为 `{ "proposalId": "proposal-a" }`。选择会写入项目状态并在刷新后恢复。
 
 需要验证真实 OpenGame 时，先初始化子模块并安装上游依赖：
 

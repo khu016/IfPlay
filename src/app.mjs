@@ -228,7 +228,7 @@ export async function createIfPlayApp(options = {}) {
           const body = await readJson(request);
           const answer = typeof body.answer === 'string' ? body.answer.trim() : '';
           let planning = store.getPlanning(project.id);
-          if (planning.status === 'proposal_ready') {
+          if (['proposal_ready', 'proposal_selected'].includes(planning.status)) {
             if (answer) throw new AppError('PLANNING_ALREADY_COMPLETE', '三个玩法提案已经生成。', 409);
             return sendJson(response, 200, { planning });
           }
@@ -253,6 +253,18 @@ export async function createIfPlayApp(options = {}) {
         } finally {
           planningProjects.delete(project.id);
         }
+      }
+
+      const selectionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/planning\/selection$/);
+      if (request.method === 'POST' && selectionMatch) {
+        const project = store.authorizeProject(selectionMatch[1], token(request));
+        const body = await readJson(request);
+        const proposalId = typeof body.proposalId === 'string' ? body.proposalId.trim() : '';
+        if (!/^proposal-[a-c]$/.test(proposalId)) {
+          throw new AppError('PROPOSAL_ID_INVALID', '请选择一个有效的玩法提案。');
+        }
+        const selected = await store.selectProposal(project.id, proposalId);
+        return sendJson(response, 200, selected);
       }
 
       const generationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/generations$/);

@@ -109,13 +109,28 @@ test('asks one useful question and persists three structured gameplay proposals'
   assert.equal(proposals.planning.status, 'proposal_ready');
   assert.equal(proposals.planning.clarifications.length, 1);
   assert.equal(proposals.planning.proposals.length, 3);
+  assert.equal(proposals.planning.usageRecords.length, 2);
   assert.equal(plannerCalls.length, 2);
+
+  const selectionResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/planning/selection`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ proposalId: 'proposal-b' }),
+    },
+  );
+  const selection = await selectionResponse.json();
+  assert.equal(selectionResponse.status, 200);
+  assert.equal(selection.planning.status, 'proposal_selected');
+  assert.equal(selection.proposal.name, '霓虹穿环');
 
   const restoredResponse = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/planning`, {
     headers: { 'x-project-token': created.token },
   });
   const restored = await restoredResponse.json();
   assert.equal(restored.planning.proposals[1].name, '霓虹穿环');
+  assert.equal(restored.planning.selectedProposalId, 'proposal-b');
   assert.equal(restored.planning.provider.model, 'test-planner');
 });
 

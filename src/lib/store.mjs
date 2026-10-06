@@ -54,7 +54,9 @@ export class ProjectStore {
         clarifications: [],
         pendingQuestion: null,
         proposals: [],
+        selectedProposalId: null,
         provider: null,
+        usageRecords: [],
         updatedAt: createdAt,
       },
       createdAt,
@@ -75,9 +77,19 @@ export class ProjectStore {
         clarifications: [],
         pendingQuestion: null,
         proposals: [],
+        selectedProposalId: null,
         provider: null,
+        usageRecords: [],
         updatedAt: project.updatedAt ?? now(),
       };
+    }
+    if (!Object.hasOwn(project.planning, 'selectedProposalId')) {
+      project.planning.selectedProposalId = null;
+    }
+    if (!Array.isArray(project.planning.usageRecords)) {
+      project.planning.usageRecords = project.planning.provider
+        ? [{ ...project.planning.provider, kind: project.planning.status, recordedAt: project.planning.updatedAt }]
+        : [];
     }
     return project;
   }
@@ -131,18 +143,46 @@ export class ProjectStore {
       planning.status = 'clarifying';
       planning.pendingQuestion = result.question;
       planning.proposals = [];
+      planning.selectedProposalId = null;
       project.status = 'clarifying';
     } else {
       planning.status = 'proposal_ready';
       planning.pendingQuestion = null;
       planning.proposals = result.proposals;
+      planning.selectedProposalId = null;
       project.status = 'proposal_ready';
     }
     planning.provider = result.provider ?? null;
+    if (result.provider) {
+      planning.usageRecords.push({
+        ...result.provider,
+        kind: result.kind,
+        recordedAt: updatedAt,
+      });
+      planning.usageRecords = planning.usageRecords.slice(-10);
+    }
     planning.updatedAt = updatedAt;
     project.updatedAt = updatedAt;
     await this.persist();
     return planning;
+  }
+
+  async selectProposal(projectId, proposalId) {
+    const project = this.getProject(projectId);
+    const planning = project.planning;
+    if (!['proposal_ready', 'proposal_selected'].includes(planning.status)) {
+      throw new AppError('PROPOSALS_NOT_READY', '玩法提案尚未生成。', 409);
+    }
+    const proposal = planning.proposals.find((item) => item.id === proposalId);
+    if (!proposal) throw new AppError('PROPOSAL_NOT_FOUND', '选择的玩法提案不存在。', 404);
+    const updatedAt = now();
+    planning.status = 'proposal_selected';
+    planning.selectedProposalId = proposal.id;
+    planning.updatedAt = updatedAt;
+    project.status = 'proposal_selected';
+    project.updatedAt = updatedAt;
+    await this.persist();
+    return { planning, proposal };
   }
 
   async createTask(projectId, kind, instruction) {
