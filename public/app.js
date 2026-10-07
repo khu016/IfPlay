@@ -49,9 +49,19 @@ const elements = {
   changeStyleButton: document.querySelector('#change-style-button'),
   confirmContractButton: document.querySelector('#confirm-contract-button'),
   modifyPanel: document.querySelector('#modify-panel'),
+  feedbackPresets: document.querySelector('#feedback-presets'),
   modifyForm: document.querySelector('#modify-form'),
   instruction: document.querySelector('#instruction'),
   modifyButton: document.querySelector('#modify-button'),
+  changePlan: document.querySelector('#change-plan'),
+  changePlanCategory: document.querySelector('#change-plan-category'),
+  changePlanSummary: document.querySelector('#change-plan-summary'),
+  changePlanChanges: document.querySelector('#change-plan-changes'),
+  changePlanPreserved: document.querySelector('#change-plan-preserved'),
+  contractImpact: document.querySelector('#contract-impact'),
+  changePlanCost: document.querySelector('#change-plan-cost'),
+  editFeedbackButton: document.querySelector('#edit-feedback-button'),
+  confirmChangeButton: document.querySelector('#confirm-change-button'),
   message: document.querySelector('#message'),
   previewTitle: document.querySelector('#preview-title'),
   previewStage: document.querySelector('#preview-stage'),
@@ -70,6 +80,8 @@ let currentPlanning = null;
 let selectedProposalId = null;
 let selectedStyleId = null;
 let styleBoardObjectUrl = null;
+let selectedFeedbackCategory = 'custom';
+let currentChangePlan = null;
 let ideaTouched = false;
 
 function loadSession() {
@@ -189,6 +201,60 @@ function renderCoreLoop(list, items) {
     }
     list.append(element);
   });
+}
+
+function renderSimpleList(list, items) {
+  list.replaceChildren();
+  items.forEach((item) => {
+    const element = document.createElement('li');
+    element.textContent = item;
+    list.append(element);
+  });
+}
+
+function categoryLabel(category) {
+  return {
+    visual: '画面',
+    pace: '节奏',
+    controls: '操作',
+    rules: '规则',
+    feedback: '反馈感',
+  }[category] ?? '自定义';
+}
+
+function contractFieldLabel(field) {
+  return {
+    coreLoop: '核心循环',
+    successCondition: '成功条件',
+    failureCondition: '失败条件',
+    visualDirection: '整体视觉方向',
+  }[field] ?? field;
+}
+
+function showFeedbackComposer() {
+  currentChangePlan = null;
+  elements.feedbackPresets.hidden = false;
+  elements.modifyForm.hidden = false;
+  elements.changePlan.hidden = true;
+}
+
+function showChangePlan(plan) {
+  currentChangePlan = plan;
+  elements.feedbackPresets.hidden = true;
+  elements.modifyForm.hidden = true;
+  elements.changePlan.hidden = false;
+  elements.changePlanCategory.textContent = categoryLabel(plan.category);
+  elements.changePlanSummary.textContent = plan.summary;
+  renderSimpleList(elements.changePlanChanges, plan.changes);
+  renderSimpleList(elements.changePlanPreserved, plan.preserved);
+  elements.contractImpact.dataset.impact = plan.touchesContract ? 'change' : 'preserve';
+  elements.contractImpact.textContent = plan.touchesContract
+    ? `这会改变玩法合同中的${plan.touchedFields.map(contractFieldLabel).join('、')}，确认即代表重新确认这些规则。`
+    : '这次不改变核心循环、结束条件和整体视觉方向。';
+  elements.changePlanCost.textContent = plan.estimatedCost;
+  elements.confirmChangeButton.textContent = plan.touchesContract
+    ? '确认合同变更并生成'
+    : '确认修改并生成';
 }
 
 function showPlan(project, proposal) {
@@ -571,6 +637,19 @@ async function loadPlayableVersion() {
     elements.versionStrip.hidden = false;
   }
   elements.modifyPanel.hidden = false;
+  const { project } = await api(`/api/projects/${session.projectId}`);
+  currentProject = project;
+  const pendingPlan = project.pendingChangePlan;
+  if (pendingPlan?.status === 'awaiting_confirmation') {
+    elements.instruction.value = pendingPlan.feedback;
+    selectedFeedbackCategory = pendingPlan.presetCategory ?? 'custom';
+    showChangePlan(pendingPlan);
+  } else {
+    showFeedbackComposer();
+    if (pendingPlan?.status === 'failed') {
+      showMessage(`${pendingPlan.error?.message ?? '上一次修改没有完成。'} 原来的可玩版本仍然保留。`);
+    }
+  }
 }
 
 async function restoreProject() {
@@ -750,18 +829,69 @@ elements.generateButton.addEventListener('click', () => {
   createGeneration('按已确认的玩法合同生成第一版。', elements.generateButton);
 });
 
+elements.feedbackPresets.querySelectorAll('button').forEach((button) => {
+  button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => {
+    selectedFeedbackCategory = button.dataset.category;
+    elements.instruction.value = button.dataset.feedback;
+    elements.feedbackPresets.querySelectorAll('button').forEach((option) => {
+      option.setAttribute('aria-pressed', String(option === button));
+    });
+    elements.instruction.focus();
+  });
+});
+
 elements.modifyForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const instruction = elements.instruction.value.trim();
-  if (instruction.length < 2) {
+  if (instruction.length < 2 || instruction.length > 1000) {
     elements.instruction.setAttribute('aria-invalid', 'true');
-    showMessage('修改要求至少写 2 个字。请说明你希望哪里发生变化。');
+    showMessage('试玩反馈需要 2 到 1000 个字符。请说明哪里不符合预期。');
     elements.instruction.focus();
     return;
   }
   elements.instruction.setAttribute('aria-invalid', 'false');
-  await createGeneration(instruction, elements.modifyButton);
-  if (elements.modifyButton.dataset.state !== 'error') elements.instruction.value = '';
+  clearMessage();
+  setButtonState(elements.modifyButton, 'loading');
+  try {
+    const { plan } = await api(`/api/projects/${session.projectId}/feedback/preview`, {
+      method: 'POST',
+      body: JSON.stringify({ feedback: instruction, category: selectedFeedbackCategory }),
+    });
+    showChangePlan(plan);
+  } catch (error) {
+    showMessage(`${error.message} 已有游戏不会受到影响，可以稍后重试。`);
+  } finally {
+    setButtonState(elements.modifyButton, 'idle');
+  }
+});
+
+elements.editFeedbackButton.addEventListener('click', () => {
+  showFeedbackComposer();
+  elements.instruction.focus();
+});
+
+elements.confirmChangeButton.addEventListener('click', async () => {
+  if (!currentChangePlan) return;
+  clearMessage();
+  setButtonState(elements.confirmChangeButton, 'loading');
+  showTask('queued', 'queued');
+  try {
+    const { task } = await api(`/api/projects/${session.projectId}/feedback/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ planId: currentChangePlan.id }),
+    });
+    await pollTask(task.id);
+    elements.instruction.value = '';
+    selectedFeedbackCategory = 'custom';
+    elements.feedbackPresets.querySelectorAll('button').forEach((button) => {
+      button.setAttribute('aria-pressed', 'false');
+    });
+  } catch (error) {
+    setButtonState(elements.confirmChangeButton, 'error');
+    showMessage(`${error.message} 原来的可玩版本仍然保留。`);
+    showTask('failed', 'failed');
+  }
 });
 
 await checkService();

@@ -101,6 +101,8 @@ export class ProjectStore {
         usageRecords: [],
         updatedAt: createdAt,
       },
+      pendingChangePlan: null,
+      feedbackUsageRecords: [],
       createdAt,
       updatedAt: createdAt,
     };
@@ -140,6 +142,8 @@ export class ProjectStore {
         ? [{ ...project.planning.provider, kind: project.planning.status, recordedAt: project.planning.updatedAt }]
         : [];
     }
+    if (!Object.hasOwn(project, 'pendingChangePlan')) project.pendingChangePlan = null;
+    if (!Array.isArray(project.feedbackUsageRecords)) project.feedbackUsageRecords = [];
     return project;
   }
 
@@ -331,7 +335,77 @@ export class ProjectStore {
     return planning;
   }
 
-  async createTask(projectId, kind, instruction) {
+  async saveFeedbackPlan(projectId, feedback, presetCategory, analysis) {
+    const project = this.getProject(projectId);
+    if (!project.currentVersionId) {
+      throw new AppError('PLAYABLE_VERSION_REQUIRED', '项目还没有可以修改的试玩版本。', 409);
+    }
+    const createdAt = now();
+    const plan = {
+      id: randomUUID(),
+      feedback,
+      presetCategory,
+      summary: analysis.summary,
+      category: analysis.category,
+      changes: analysis.changes,
+      preserved: analysis.preserved,
+      touchesContract: analysis.touchesContract,
+      touchedFields: analysis.touchedFields,
+      instruction: analysis.instruction,
+      estimatedCost: analysis.estimatedCost,
+      status: 'awaiting_confirmation',
+      createdAt,
+      confirmedAt: null,
+      appliedAt: null,
+      error: null,
+    };
+    project.pendingChangePlan = plan;
+    if (analysis.provider) {
+      project.feedbackUsageRecords.push({
+        ...analysis.provider,
+        kind: 'feedback_analysis',
+        recordedAt: createdAt,
+      });
+      project.feedbackUsageRecords = project.feedbackUsageRecords.slice(-10);
+    }
+    project.status = 'change_plan_ready';
+    project.updatedAt = createdAt;
+    await this.persist();
+    return plan;
+  }
+
+  async confirmFeedbackPlan(projectId, planId) {
+    const project = this.getProject(projectId);
+    const plan = project.pendingChangePlan;
+    if (!plan || plan.id !== planId) {
+      throw new AppError('CHANGE_PLAN_NOT_FOUND', '这份修改计划已经失效，请重新整理反馈。', 409);
+    }
+    if (plan.status !== 'awaiting_confirmation') {
+      throw new AppError('CHANGE_PLAN_ALREADY_USED', '这份修改计划已经提交过。', 409);
+    }
+    const confirmedAt = now();
+    plan.status = 'confirmed';
+    plan.confirmedAt = confirmedAt;
+    if (plan.touchesContract && project.planning?.gameContract) {
+      const amendments = Array.isArray(project.planning.gameContract.amendments)
+        ? project.planning.gameContract.amendments
+        : [];
+      amendments.push({
+        planId: plan.id,
+        summary: plan.summary,
+        feedback: plan.feedback,
+        touchedFields: plan.touchedFields,
+        confirmedAt,
+      });
+      project.planning.gameContract.amendments = amendments.slice(-10);
+      project.planning.gameContract.confirmedAt = confirmedAt;
+    }
+    project.updatedAt = confirmedAt;
+    await this.persist();
+    return plan;
+  }
+
+  async createTask(projectId, kind, instruction, metadata = {}) {
     const id = randomUUID();
     const createdAt = now();
     const task = {
@@ -347,9 +421,13 @@ export class ProjectStore {
       updatedAt: createdAt,
       startedAt: null,
       finishedAt: null,
+      changePlanId: metadata.changePlanId ?? null,
     };
     this.state.tasks[id] = task;
     const project = this.getProject(projectId);
+    if (task.changePlanId && project.pendingChangePlan?.id === task.changePlanId) {
+      project.pendingChangePlan.status = 'generating';
+    }
     project.status = 'generating';
     project.updatedAt = createdAt;
     await this.persist();
@@ -407,6 +485,10 @@ export class ProjectStore {
       finishedAt: now(),
       updatedAt: now(),
     });
+    if (task.changePlanId && project.pendingChangePlan?.id === task.changePlanId) {
+      project.pendingChangePlan.status = 'applied';
+      project.pendingChangePlan.appliedAt = now();
+    }
     await this.persist();
     return version;
   }
@@ -422,6 +504,13 @@ export class ProjectStore {
       updatedAt: now(),
     });
     project.status = project.currentVersionId ? 'playable' : 'failed';
+    if (task.changePlanId && project.pendingChangePlan?.id === task.changePlanId) {
+      project.pendingChangePlan.status = 'failed';
+      project.pendingChangePlan.error = {
+        code: error.code ?? 'GENERATION_FAILED',
+        message: error.message,
+      };
+    }
     project.updatedAt = now();
     await this.persist();
   }

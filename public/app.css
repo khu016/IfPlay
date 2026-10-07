@@ -561,12 +561,150 @@ textarea[data-state="success"] {
 }
 
 .modify-panel {
+  display: grid;
+  gap: var(--space-lg);
   border-top: var(--rule-thin) dashed var(--color-rule-strong);
   padding-top: var(--space-lg);
 }
 
+.modify-panel__intro {
+  max-width: 34rem;
+  color: var(--color-ink-soft);
+  font-size: var(--text-sm);
+}
+
+.feedback-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.feedback-presets button {
+  min-height: 2.5rem;
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--dur-short) var(--ease-out),
+    background-color var(--dur-short) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+.feedback-presets button:hover {
+  border-color: var(--color-ink);
+  transform: translateY(-1px);
+}
+
+.feedback-presets button[aria-pressed="true"] {
+  border-color: var(--color-ink);
+  background: var(--color-cyan);
+  font-weight: 700;
+}
+
 .modify-panel textarea {
   min-height: 6.5rem;
+}
+
+.change-plan {
+  display: grid;
+  gap: var(--space-md);
+  border-block: var(--rule-strong) solid var(--color-ink);
+  padding-block: var(--space-lg);
+}
+
+.change-plan__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.change-plan h3,
+.change-plan h4 {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+.change-plan h3 {
+  font-size: var(--text-lg);
+  letter-spacing: -0.025em;
+}
+
+.change-plan__head span {
+  align-self: flex-start;
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2xs) var(--space-sm);
+  color: var(--color-ink-soft);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.change-plan__summary {
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+.change-plan__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
+
+.change-plan__columns > div {
+  display: grid;
+  align-content: start;
+  gap: var(--space-sm);
+  border-top: var(--rule-thin) dashed var(--color-rule-strong);
+  padding-top: var(--space-md);
+}
+
+.change-plan__columns ul {
+  display: grid;
+  gap: var(--space-xs);
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--color-ink-soft);
+  font-size: var(--text-sm);
+}
+
+.contract-impact {
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-soft);
+  padding: var(--space-md);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.contract-impact[data-impact="change"] {
+  border-color: var(--color-danger);
+  background: var(--color-coral-soft);
+  color: var(--color-danger);
+}
+
+.change-plan__cost {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: var(--space-md);
+  color: var(--color-ink-soft);
+  font-size: var(--text-sm);
+}
+
+.change-plan__cost strong {
+  color: var(--color-ink);
+}
+
+.change-plan__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  border-top: var(--rule-thin) dashed var(--color-rule-strong);
+  padding-top: var(--space-md);
 }
 
 .message {
@@ -1165,6 +1303,10 @@ textarea[data-state="success"] {
     max-width: 42rem;
   }
 
+  .change-plan__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .proposal-option__body {
     min-height: 0;
   }
@@ -1220,6 +1362,22 @@ textarea[data-state="success"] {
   .contract-notes p {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-2xs);
+  }
+
+  .change-plan__head,
+  .change-plan__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .change-plan__cost {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2xs);
+  }
+
+  .change-plan__actions .action,
+  .change-plan__actions .text-action {
+    width: 100%;
   }
 
   .plan-card__actions {

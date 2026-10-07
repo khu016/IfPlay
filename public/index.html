@@ -97,20 +97,53 @@
           <div>
             <p class="mode-label">继续调整</p>
             <h2 id="modify-title">哪里还不像你想的？</h2>
+            <p class="modify-panel__intro">先说感受，AI 会把它整理成明确修改项；你确认后才会生成新版本。</p>
+          </div>
+          <div class="feedback-presets" id="feedback-presets" aria-label="常见试玩反馈">
+            <button type="button" data-category="rules" data-feedback="太难了">太难了</button>
+            <button type="button" data-category="pace" data-feedback="节奏太慢">节奏太慢</button>
+            <button type="button" data-category="controls" data-feedback="操作不跟手">操作不跟手</button>
+            <button type="button" data-category="feedback" data-feedback="奖励不明显">奖励不明显</button>
+            <button type="button" data-category="visual" data-feedback="画面不像所选方向">画面不像所选方向</button>
+            <button type="button" data-category="rules" data-feedback="不知道该做什么">不知道该做什么</button>
+            <button type="button" data-category="rules" data-feedback="我想增加惊喜">我想增加惊喜</button>
           </div>
           <form id="modify-form" novalidate>
-            <label for="instruction">修改要求</label>
+            <label for="instruction">补充你遇到的具体情况</label>
             <textarea
               id="instruction"
               name="instruction"
               rows="3"
               minlength="2"
-              maxlength="2000"
-              placeholder="例如：节奏慢一点，按钮更大，失败后可以马上重来。"
+              maxlength="1000"
+              placeholder="例如：第二关雨滴太密，手机上来不及躲。"
               required
             ></textarea>
-            <button class="action action--secondary" id="modify-button" type="submit">生成新版本</button>
+            <button class="action action--secondary" id="modify-button" type="submit">先看看会改什么</button>
           </form>
+          <section class="change-plan" id="change-plan" hidden aria-labelledby="change-plan-title">
+            <div class="change-plan__head">
+              <h3 id="change-plan-title">这次会怎么改</h3>
+              <span id="change-plan-category"></span>
+            </div>
+            <p class="change-plan__summary" id="change-plan-summary"></p>
+            <div class="change-plan__columns">
+              <div>
+                <h4>会改变</h4>
+                <ul id="change-plan-changes"></ul>
+              </div>
+              <div>
+                <h4>保持不变</h4>
+                <ul id="change-plan-preserved"></ul>
+              </div>
+            </div>
+            <p class="contract-impact" id="contract-impact"></p>
+            <p class="change-plan__cost"><strong>预计消耗</strong><span id="change-plan-cost"></span></p>
+            <div class="change-plan__actions">
+              <button class="text-action" id="edit-feedback-button" type="button">返回修改反馈</button>
+              <button class="action action--primary" id="confirm-change-button" type="button">确认修改并生成</button>
+            </div>
+          </section>
         </section>
 
         <div class="message" id="message" role="alert" hidden></div>

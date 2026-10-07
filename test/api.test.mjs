@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createIfPlayApp } from '../src/app.mjs';
+import { normalizeFeedbackAnalysis } from '../src/lib/feedback.mjs';
 import { normalizePlannerResult } from '../src/lib/planner.mjs';
 import { ProjectStore } from '../src/lib/store.mjs';
 
@@ -47,6 +48,32 @@ test('enforces the three-question limit and rejects duplicate gameplay proposals
   assert.throws(
     () => normalizePlannerResult({ kind: 'proposals', proposals: [repeated, repeated, repeated] }, 0),
     (error) => error.code === 'PLANNER_RESPONSE_INVALID',
+  );
+});
+
+test('validates structured feedback analysis and contract boundaries', () => {
+  const result = normalizeFeedbackAnalysis({
+    summary: '把整体画风改成黑白剪纸',
+    category: 'visual',
+    changes: ['重做整体色彩和材质'],
+    preserved: ['保持核心循环', '保持成功与失败条件'],
+    touchesContract: true,
+    touchedFields: ['visualDirection', 'unknown'],
+    instruction: '只把整体视觉方向改成黑白剪纸，其他玩法保持不变。',
+  });
+  assert.equal(result.touchesContract, true);
+  assert.deepEqual(result.touchedFields, ['visualDirection']);
+  assert.throws(
+    () => normalizeFeedbackAnalysis({
+      summary: '改变规则',
+      category: 'rules',
+      changes: ['修改规则'],
+      preserved: ['保持画面', '保持操作'],
+      touchesContract: true,
+      touchedFields: [],
+      instruction: '修改规则。',
+    }),
+    (error) => error.code === 'FEEDBACK_RESPONSE_INVALID',
   );
 });
 
@@ -268,6 +295,73 @@ async function waitForTask(baseUrl, taskId, token) {
   }
   throw new Error('task timeout');
 }
+
+test('previews a targeted change and requires confirmation before creating a version', async (t) => {
+  const feedbackCalls = [];
+  const feedbackAnalyzer = async (input) => {
+    feedbackCalls.push(input);
+    return {
+      summary: '把整体画风改成黑白剪纸',
+      category: 'visual',
+      changes: ['将整体色彩和材质改为黑白剪纸'],
+      preserved: ['保持纸飞机收集星光的核心循环', '保持成功与失败条件'],
+      touchesContract: true,
+      touchedFields: ['visualDirection'],
+      instruction: '把整体视觉改成黑白剪纸，玩法、操作和结束条件保持不变。',
+      estimatedCost: '1 次修改任务；人民币金额待供应商账单核对',
+      provider: { model: 'test-feedback', usage: { total_tokens: 88 } },
+    };
+  };
+  const app = await startApp({ feedbackAnalyzer });
+  t.after(() => app.server.close());
+  const created = await app.store.createProject('做一个纸飞机收集星光的游戏');
+  const project = app.store.getProject(created.project.id);
+  project.planning.gameContract = { status: 'confirmed', amendments: [] };
+  await app.store.persist();
+  const firstTask = await app.store.createTask(created.project.id, 'initial', '生成第一版');
+  const firstDir = path.join(app.store.dataDir, 'feedback-first');
+  await mkdir(firstDir, { recursive: true });
+  await writeFile(path.join(firstDir, 'index.html'), '<h1>第一版</h1>');
+  await app.store.completeTask(firstTask.id, {
+    generatorMode: 'demo',
+    outputPath: path.join(firstDir, 'index.html'),
+  });
+  const headers = { 'content-type': 'application/json', 'x-project-token': created.token };
+
+  const previewResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/feedback/preview`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ feedback: '我想把画面改成黑白剪纸', category: 'visual' }),
+    },
+  );
+  const preview = await previewResponse.json();
+  assert.equal(previewResponse.status, 200);
+  assert.equal(preview.plan.status, 'awaiting_confirmation');
+  assert.equal(preview.plan.touchesContract, true);
+  assert.equal(feedbackCalls.length, 1);
+  assert.equal(app.store.listVersions(created.project.id).length, 1);
+
+  const invalidConfirm = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/feedback/confirm`,
+    { method: 'POST', headers, body: JSON.stringify({ planId: 'expired-plan' }) },
+  );
+  assert.equal(invalidConfirm.status, 409);
+
+  const confirmResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/feedback/confirm`,
+    { method: 'POST', headers, body: JSON.stringify({ planId: preview.plan.id }) },
+  );
+  const confirmed = await confirmResponse.json();
+  assert.equal(confirmResponse.status, 202);
+  assert.match(confirmed.task.instruction, /保持不变/);
+  assert.match(confirmed.task.instruction, /用户已再次确认修改玩法合同字段/);
+  assert.equal(project.planning.gameContract.amendments.length, 1);
+  assert.equal((await waitForTask(app.baseUrl, confirmed.task.id, created.token)).status, 'succeeded');
+  assert.equal(app.store.getProject(created.project.id).pendingChangePlan.status, 'applied');
+  assert.equal(app.store.listVersions(created.project.id).length, 2);
+});
 
 test('creates a project, generates a playable version, and modifies it', async (t) => {
   const app = await startApp();

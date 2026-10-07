@@ -4,6 +4,7 @@ import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { AppError, errorBody } from './lib/errors.mjs';
 import { generateGame } from './lib/generator.mjs';
+import { analyzeFeedback } from './lib/feedback.mjs';
 import { planGame } from './lib/planner.mjs';
 import { TaskQueue } from './lib/queue.mjs';
 import { ProjectStore } from './lib/store.mjs';
@@ -166,14 +167,29 @@ function gameContractInstruction(contract) {
   ].join('\n');
 }
 
+function changePlanInstruction(plan) {
+  return [
+    `执行已经由用户确认的定向修改：“${plan.summary}”。`,
+    plan.instruction,
+    `只允许改变：${plan.changes.join('；')}`,
+    `必须保持不变：${plan.preserved.join('；')}`,
+    plan.touchesContract
+      ? `用户已再次确认修改玩法合同字段：${plan.touchedFields.join('、')}。`
+      : '本次不改变玩法合同中的核心循环、结束条件和整体视觉方向。',
+    '基于当前可玩版本修改，不要重做整个项目。',
+  ].join('\n');
+}
+
 export async function createIfPlayApp(options = {}) {
   const dataDir = options.dataDir ?? process.env.IFPLAY_DATA_DIR ?? '.data';
   const store = new ProjectStore(dataDir);
   await store.init();
   const planner = options.planner ?? planGame;
   const styleBoardGenerator = options.styleBoardGenerator ?? generateStyleBoard;
+  const feedbackAnalyzer = options.feedbackAnalyzer ?? analyzeFeedback;
   const planningProjects = new Set();
   const styleBoardProjects = new Set();
+  const feedbackProjects = new Set();
   const concurrency = Number(options.concurrency ?? process.env.IFPLAY_MAX_CONCURRENT_TASKS ?? 2);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 2) {
     throw new Error('IFPLAY_MAX_CONCURRENT_TASKS 必须是 1 或 2');
@@ -357,6 +373,66 @@ export async function createIfPlayApp(options = {}) {
         const project = store.authorizeProject(contractMatch[1], token(request));
         const planning = await store.confirmGameContract(project.id);
         return sendJson(response, 200, { planning });
+      }
+
+      const feedbackPreviewMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/feedback\/preview$/,
+      );
+      if (request.method === 'POST' && feedbackPreviewMatch) {
+        const project = store.authorizeProject(feedbackPreviewMatch[1], token(request));
+        if (!project.currentVersionId) {
+          throw new AppError('PLAYABLE_VERSION_REQUIRED', '项目还没有可以修改的试玩版本。', 409);
+        }
+        if (store.hasActiveTask(project.id)) {
+          throw new AppError('PROJECT_BUSY', '当前项目正在生成，请完成后再整理修改。', 409);
+        }
+        if (feedbackProjects.has(project.id)) {
+          throw new AppError('FEEDBACK_BUSY', 'AI 正在整理这次修改，请稍后再试。', 409);
+        }
+        const body = await readJson(request);
+        const feedback = typeof body.feedback === 'string' ? body.feedback.trim() : '';
+        const presetCategory = typeof body.category === 'string' ? body.category.trim() : 'custom';
+        if (feedback.length < 2 || feedback.length > 1000) {
+          throw new AppError('FEEDBACK_INVALID', '试玩反馈需要 2 到 1000 个字符。');
+        }
+        if (!['visual', 'pace', 'controls', 'rules', 'feedback', 'custom'].includes(presetCategory)) {
+          throw new AppError('FEEDBACK_CATEGORY_INVALID', '试玩反馈分类无效。');
+        }
+        feedbackProjects.add(project.id);
+        try {
+          const analysis = await feedbackAnalyzer({
+            feedback,
+            presetCategory,
+            project: store.publicProject(project),
+            contract: project.planning?.gameContract ?? null,
+          });
+          const plan = await store.saveFeedbackPlan(project.id, feedback, presetCategory, analysis);
+          return sendJson(response, 200, { plan });
+        } finally {
+          feedbackProjects.delete(project.id);
+        }
+      }
+
+      const feedbackConfirmMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/feedback\/confirm$/,
+      );
+      if (request.method === 'POST' && feedbackConfirmMatch) {
+        const project = store.authorizeProject(feedbackConfirmMatch[1], token(request));
+        if (store.hasActiveTask(project.id)) {
+          throw new AppError('PROJECT_BUSY', '当前项目已有生成任务，请等待完成后再修改。', 409);
+        }
+        const body = await readJson(request);
+        const planId = typeof body.planId === 'string' ? body.planId.trim() : '';
+        if (!planId) throw new AppError('CHANGE_PLAN_ID_INVALID', '修改计划编号无效。');
+        const plan = await store.confirmFeedbackPlan(project.id, planId);
+        const task = await store.createTask(
+          project.id,
+          'modify',
+          changePlanInstruction(plan),
+          { changePlanId: plan.id },
+        );
+        queue.add(task);
+        return sendJson(response, 202, { task, plan });
       }
 
       const generationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/generations$/);
