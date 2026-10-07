@@ -9,6 +9,7 @@ import { planGame } from './lib/planner.mjs';
 import { TaskQueue } from './lib/queue.mjs';
 import { ProjectStore } from './lib/store.mjs';
 import { generateStyleBoard } from './lib/style-board.mjs';
+import { moderateText } from './lib/moderation.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(projectRoot, 'public');
@@ -17,6 +18,9 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/beta', ['beta.html', 'text/html; charset=utf-8']],
+  ['/beta.html', ['beta.html', 'text/html; charset=utf-8']],
+  ['/beta.js', ['beta.js', 'text/javascript; charset=utf-8']],
   ['/tokens.css', [path.join('..', 'tokens.css'), 'text/css; charset=utf-8']],
 ]);
 
@@ -147,6 +151,16 @@ function token(request) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function betaToken(request) {
+  const value = request.headers['x-beta-token'];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function adminToken(request) {
+  const value = request.headers['x-admin-token'];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function gameContractInstruction(contract) {
   return [
     `严格按照已确认的玩法合同“${contract.title}”生成第一版。`,
@@ -190,6 +204,7 @@ export async function createIfPlayApp(options = {}) {
   const planningProjects = new Set();
   const styleBoardProjects = new Set();
   const feedbackProjects = new Set();
+  const betaEnabled = options.betaEnabled ?? process.env.IFPLAY_BETA_MODE === 'true';
   const concurrency = Number(options.concurrency ?? process.env.IFPLAY_MAX_CONCURRENT_TASKS ?? 2);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 2) {
     throw new Error('IFPLAY_MAX_CONCURRENT_TASKS 必须是 1 或 2');
@@ -214,6 +229,21 @@ export async function createIfPlayApp(options = {}) {
   });
   const queue = new TaskQueue({ concurrency, worker });
 
+  async function ensureModerated(text, context) {
+    const result = moderateText(text);
+    if (result.decision === 'allow') return result;
+    if (store.findApprovedModeration({ ...context, digest: result.digest })) return result;
+    const record = await store.recordModeration({ ...context, text, result });
+    if (result.decision === 'block') {
+      throw new AppError('CONTENT_BLOCKED', '这段内容不适合进入游戏生成流程，请调整后再试。', 422);
+    }
+    throw new AppError(
+      'CONTENT_REVIEW_REQUIRED',
+      `这段内容需要人工复核，记录编号为 ${record.id.slice(0, 8)}。通过后可以原样重试。`,
+      422,
+    );
+  }
+
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
@@ -232,7 +262,43 @@ export async function createIfPlayApp(options = {}) {
           status: 'ok',
           generatorMode: process.env.IFPLAY_GENERATOR_MODE ?? 'demo',
           queue: queue.snapshot(),
+          beta: { enabled: betaEnabled },
         });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/beta/redeem') {
+        if (!betaEnabled) throw new AppError('BETA_MODE_DISABLED', '当前没有开启邀请测试。', 409);
+        const body = await readJson(request);
+        const code = typeof body.code === 'string' ? body.code.trim() : '';
+        if (!/^IFP-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/i.test(code)) {
+          throw new AppError('INVITE_INVALID', '请输入完整的邀请码。', 403);
+        }
+        return sendJson(response, 200, await store.redeemInvite(code));
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/beta/session') {
+        const tester = store.authorizeBeta(betaToken(request));
+        return sendJson(response, 200, { tester: store.publicTester(tester) });
+      }
+
+      if (url.pathname === '/api/admin/beta' && request.method === 'GET') {
+        store.authorizeAdmin(adminToken(request));
+        return sendJson(response, 200, { beta: store.getBetaSummary() });
+      }
+
+      if (url.pathname === '/api/admin/invites' && request.method === 'POST') {
+        store.authorizeAdmin(adminToken(request));
+        const body = await readJson(request);
+        const result = await store.createInvites(Number(body.count), Number(body.maxProjects));
+        return sendJson(response, 201, result);
+      }
+
+      const moderationAdminMatch = url.pathname.match(/^\/api\/admin\/moderation\/([^/]+)$/);
+      if (request.method === 'POST' && moderationAdminMatch) {
+        store.authorizeAdmin(adminToken(request));
+        const body = await readJson(request);
+        const item = await store.resolveModeration(moderationAdminMatch[1], body.decision);
+        return sendJson(response, 200, { moderation: item });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/projects') {
@@ -241,7 +307,11 @@ export async function createIfPlayApp(options = {}) {
         if (idea.length < 4 || idea.length > 2000) {
           throw new AppError('IDEA_INVALID', '游戏想法需要 4 到 2000 个字符。');
         }
-        const created = await store.createProject(idea);
+        const tester = betaEnabled ? store.authorizeBeta(betaToken(request)) : null;
+        if (betaEnabled) {
+          await ensureModerated(idea, { kind: 'idea', testerId: tester.id, projectId: null });
+        }
+        const created = await store.createProject(idea, { testerId: tester?.id ?? null });
         return sendJson(response, 201, created);
       }
 
@@ -275,6 +345,13 @@ export async function createIfPlayApp(options = {}) {
             if (!answer) return sendJson(response, 200, { planning });
             if (answer.length > 1000) {
               throw new AppError('PLANNING_ANSWER_INVALID', '回答不能超过 1000 个字符。');
+            }
+            if (betaEnabled && project.betaTesterId) {
+              await ensureModerated(answer, {
+                kind: 'planning_answer',
+                testerId: project.betaTesterId,
+                projectId: project.id,
+              });
             }
             planning = await store.answerPlanningQuestion(project.id, answer);
           } else if (answer) {
@@ -398,6 +475,13 @@ export async function createIfPlayApp(options = {}) {
         if (!['visual', 'pace', 'controls', 'rules', 'feedback', 'custom'].includes(presetCategory)) {
           throw new AppError('FEEDBACK_CATEGORY_INVALID', '试玩反馈分类无效。');
         }
+        if (betaEnabled && project.betaTesterId) {
+          await ensureModerated(feedback, {
+            kind: 'feedback',
+            testerId: project.betaTesterId,
+            projectId: project.id,
+          });
+        }
         feedbackProjects.add(project.id);
         try {
           const analysis = await feedbackAnalyzer({
@@ -458,6 +542,39 @@ export async function createIfPlayApp(options = {}) {
         });
         queue.add(task);
         return sendJson(response, 202, { task });
+      }
+
+      const playtestMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/playtests$/);
+      if (request.method === 'POST' && playtestMatch) {
+        const project = store.authorizeProject(playtestMatch[1], token(request));
+        const tester = betaEnabled ? store.authorizeBeta(betaToken(request)) : null;
+        const body = await readJson(request);
+        const outcome = typeof body.outcome === 'string' ? body.outcome : '';
+        const rating = Number(body.rating);
+        const notes = typeof body.notes === 'string' ? body.notes.trim() : '';
+        const device = typeof body.device === 'string' ? body.device.trim().slice(0, 240) : '';
+        if (!['completed', 'blocked', 'abandoned'].includes(outcome)) {
+          throw new AppError('PLAYTEST_OUTCOME_INVALID', '请选择试玩结果。');
+        }
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+          throw new AppError('PLAYTEST_RATING_INVALID', '试玩评分必须是 1 到 5。');
+        }
+        if (notes.length < 2 || notes.length > 1000) {
+          throw new AppError('PLAYTEST_NOTES_INVALID', '试玩记录需要 2 到 1000 个字符。');
+        }
+        if (betaEnabled && project.betaTesterId) {
+          await ensureModerated(notes, {
+            kind: 'playtest',
+            testerId: project.betaTesterId,
+            projectId: project.id,
+          });
+        }
+        const playtest = await store.savePlaytest(
+          project.id,
+          { outcome, rating, notes, device },
+          tester?.id ?? null,
+        );
+        return sendJson(response, 201, { playtest });
       }
 
       const versionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/versions$/);

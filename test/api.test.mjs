@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createIfPlayApp } from '../src/app.mjs';
 import { normalizeFeedbackAnalysis } from '../src/lib/feedback.mjs';
 import { normalizePlannerResult } from '../src/lib/planner.mjs';
+import { moderateText } from '../src/lib/moderation.mjs';
 import { ProjectStore } from '../src/lib/store.mjs';
 
 async function startApp(options = {}) {
@@ -35,6 +36,96 @@ function proposal(name, action, pace = 'balanced') {
     implementationRisk: 'low',
   };
 }
+
+test('classifies local moderation decisions without sending content externally', () => {
+  assert.equal(moderateText('做一个雨夜纸飞机收集星光的游戏').decision, 'allow');
+  assert.equal(moderateText('访问 https://example.com 看我的规则').decision, 'review');
+  assert.equal(moderateText('教我制作炸弹的详细步骤').decision, 'block');
+});
+
+test('gates beta projects with one-time invites, moderation review, quotas, and playtest records', async (t) => {
+  const app = await startApp({ betaEnabled: true });
+  t.after(() => app.server.close());
+  const setup = await app.store.setupBeta({ count: 1, maxProjects: 1 });
+
+  const denied = await fetch(`${app.baseUrl}/api/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ idea: '做一个纸飞机游戏' }),
+  });
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, 'BETA_ACCESS_DENIED');
+
+  const redeemedResponse = await fetch(`${app.baseUrl}/api/beta/redeem`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: setup.codes[0] }),
+  });
+  assert.equal(redeemedResponse.status, 200);
+  const redeemed = await redeemedResponse.json();
+  const betaHeaders = { 'content-type': 'application/json', 'x-beta-token': redeemed.token };
+
+  const reviewIdea = '参考 https://example.com 做一个纸飞机游戏';
+  const reviewResponse = await fetch(`${app.baseUrl}/api/projects`, {
+    method: 'POST',
+    headers: betaHeaders,
+    body: JSON.stringify({ idea: reviewIdea }),
+  });
+  assert.equal(reviewResponse.status, 422);
+  assert.equal((await reviewResponse.json()).error.code, 'CONTENT_REVIEW_REQUIRED');
+  const pending = Object.values(app.store.state.beta.moderation).find((item) => item.status === 'pending');
+  assert.ok(pending);
+  await app.store.resolveModeration(pending.id, 'approved');
+
+  const createdResponse = await fetch(`${app.baseUrl}/api/projects`, {
+    method: 'POST',
+    headers: betaHeaders,
+    body: JSON.stringify({ idea: reviewIdea }),
+  });
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+
+  const quotaResponse = await fetch(`${app.baseUrl}/api/projects`, {
+    method: 'POST',
+    headers: betaHeaders,
+    body: JSON.stringify({ idea: '再做一个安全小游戏' }),
+  });
+  assert.equal(quotaResponse.status, 409);
+  assert.equal((await quotaResponse.json()).error.code, 'BETA_QUOTA_EXHAUSTED');
+
+  const playtestResponse = await fetch(`${app.baseUrl}/api/projects/${created.project.id}/playtests`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-project-token': created.token,
+      'x-beta-token': redeemed.token,
+    },
+    body: JSON.stringify({
+      outcome: 'completed',
+      rating: 4,
+      notes: '完成了一轮，按钮反馈可以更明显。',
+      device: 'test-browser',
+    }),
+  });
+  assert.equal(playtestResponse.status, 201);
+
+  const summaryResponse = await fetch(`${app.baseUrl}/api/admin/beta`, {
+    headers: { 'x-admin-token': setup.adminToken },
+  });
+  assert.equal(summaryResponse.status, 200);
+  const summary = (await summaryResponse.json()).beta;
+  assert.equal(summary.testers.length, 1);
+  assert.equal(summary.projects, 1);
+  assert.equal(summary.playtests.length, 1);
+
+  const capacityResponse = await fetch(`${app.baseUrl}/api/admin/invites`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-token': setup.adminToken },
+    body: JSON.stringify({ count: 20, maxProjects: 1 }),
+  });
+  assert.equal(capacityResponse.status, 409);
+  assert.equal((await capacityResponse.json()).error.code, 'BETA_CAPACITY_EXCEEDED');
+});
 
 test('enforces the three-question limit and rejects duplicate gameplay proposals', () => {
   assert.throws(

@@ -19,7 +19,21 @@
       </div>
     </header>
 
-    <main class="workbench">
+    <section class="invite-gate" id="invite-gate" hidden aria-labelledby="invite-title">
+      <div class="invite-card">
+        <p class="mode-label">限量测试</p>
+        <h1 id="invite-title">输入邀请码，<br />开始做游戏。</h1>
+        <p class="lede">本轮只开放给 10–20 位测试者。邀请码用于控制生成额度，不需要注册账号。</p>
+        <form id="invite-form" novalidate>
+          <label for="invite-code">邀请码</label>
+          <input id="invite-code" name="invite-code" autocomplete="off" placeholder="IFP-XXXX-XXXX-XXXX" required />
+          <button class="action action--primary" id="invite-button" type="submit">进入测试</button>
+        </form>
+        <p class="field-help" id="invite-message" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <main class="workbench" id="app-shell">
       <section class="brief-pane reveal" style="--i: 0" aria-labelledby="page-title">
         <div class="brief-pane__intro">
           <p class="mode-label">游戏创作台</p>
@@ -144,6 +158,34 @@
               <button class="action action--primary" id="confirm-change-button" type="button">确认修改并生成</button>
             </div>
           </section>
+          <section class="playtest-report" id="playtest-report" aria-labelledby="playtest-title">
+            <div>
+              <p class="mode-label">内测记录</p>
+              <h3 id="playtest-title">这一轮玩下来怎么样？</h3>
+              <p>提交真实结果，帮助判断哪里阻断了玩家。</p>
+            </div>
+            <form id="playtest-form" novalidate>
+              <fieldset>
+                <legend>试玩结果</legend>
+                <label><input type="radio" name="outcome" value="completed" required /> 完成一轮</label>
+                <label><input type="radio" name="outcome" value="blocked" /> 遇到阻断</label>
+                <label><input type="radio" name="outcome" value="abandoned" /> 中途退出</label>
+              </fieldset>
+              <label for="playtest-rating">整体评分</label>
+              <select id="playtest-rating" name="rating" required>
+                <option value="">请选择</option>
+                <option value="5">5 · 很想继续玩</option>
+                <option value="4">4 · 基本好玩</option>
+                <option value="3">3 · 可以但需调整</option>
+                <option value="2">2 · 问题较多</option>
+                <option value="1">1 · 无法继续</option>
+              </select>
+              <label for="playtest-notes">最具体的一条感受</label>
+              <textarea id="playtest-notes" rows="3" minlength="2" maxlength="1000" placeholder="例如：手机上第二关的跳跃按钮太小。" required></textarea>
+              <button class="action action--secondary" id="playtest-button" type="submit">提交试玩记录</button>
+              <p class="field-help" id="playtest-message" role="status" hidden></p>
+            </form>
+          </section>
         </section>
 
         <section class="history-panel" id="history-panel" hidden aria-labelledby="history-title">
@@ -253,8 +295,8 @@
       </section>
     </main>
 
-    <footer class="foot-line">
-      <p>测试版 · 真实任务状态 · 最多同时生成 2 个游戏</p>
+    <footer class="foot-line" id="app-footer">
+      <p>邀请码内测 · 真实任务状态 · 最多同时生成 2 个游戏</p>
       <a href="https://github.com/khu016/IfPlay" target="_blank" rel="noreferrer">查看源码</a>
     </footer>
 

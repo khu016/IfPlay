@@ -32,6 +32,8 @@ IfPlay 面向不会编程的普通用户和内容创作者。用户用中文描�
 - [x] 完成结构化试玩反馈和定向修改确认。
 - [x] 完成版本历史、预览与无模型恢复。
 - [x] 完成五类代表需求的 MVP 总验收与交付清单（5/5 通过）。
+- [x] 完成本机邀请码、额度、基础内容筛查、人工复核和试玩记录后台。
+- [ ] 完成 10–20 人真人测试与云端生成沙箱。
 
 项目状态见 [docs/项目状态.md](docs/项目状态.md)，完整需求见 [PRD-IfPlay-MVP-v1.0.md](PRD-IfPlay-MVP-v1.0.md)。
 
@@ -86,6 +88,8 @@ npm test
 ```
 
 Stage 10 的五类真实验收可用 `npm run acceptance:stage10` 续跑。该命令会调用真实策划、图片和游戏生成服务，可能产生费用；已完成项目会复用本地状态，不重复生成。验收结论与边界见 [docs/阶段文档/Stage10-MVP总验收.md](docs/阶段文档/Stage10-MVP总验收.md)。
+
+本机邀请测试先运行 `npm run beta:setup` 初始化一次，再将 `.env` 中的 `IFPLAY_BETA_MODE` 设为 `true`。创作页会要求邀请码，测试后台位于 `/beta`，不含密钥的汇总可用 `npm run beta:report` 查看。明文邀请码和后台凭证只保存在 `.data/beta-access.json`，不得提交。详细边界见 [docs/阶段文档/Stage11-本机邀请测试准备.md](docs/阶段文档/Stage11-本机邀请测试准备.md)。
 
 ## 开源说明
 

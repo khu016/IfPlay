@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="IfPlay 本机邀请测试后台。" />
+    <title>IfPlay · 测试后台</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body class="beta-admin">
+    <header class="nav-edge">
+      <a class="wordmark" href="/">IfPlay</a>
+      <span class="mode-label">本机测试后台</span>
+    </header>
+    <main class="beta-admin__main">
+      <section class="beta-login" id="admin-login">
+        <p class="mode-label">管理员</p>
+        <h1>查看内测进度。</h1>
+        <p class="lede">凭证只保存在当前标签页，关闭后需要重新输入。</p>
+        <form id="admin-form">
+          <label for="admin-token">后台凭证</label>
+          <input id="admin-token" type="password" autocomplete="off" required />
+          <button class="action action--primary" type="submit">打开后台</button>
+        </form>
+        <p class="field-help" id="admin-message" role="alert" hidden></p>
+      </section>
+
+      <div class="beta-dashboard" id="beta-dashboard" hidden>
+        <header class="beta-dashboard__head">
+          <div><p class="mode-label">Stage 11</p><h1>邀请测试进度</h1></div>
+          <button class="text-action" id="refresh-button" type="button">刷新</button>
+        </header>
+        <section class="beta-metrics" aria-label="测试概况">
+          <article><span>邀请码</span><strong id="metric-invites">0</strong><small id="metric-invites-detail"></small></article>
+          <article><span>已兑换资格</span><strong id="metric-testers">0</strong><small>包含技术验收；真人结果单独确认</small></article>
+          <article><span>测试项目</span><strong id="metric-projects">0</strong><small>仅本机环境</small></article>
+          <article><span>试玩记录</span><strong id="metric-playtests">0</strong><small id="metric-completion"></small></article>
+        </section>
+
+        <section class="beta-panel">
+          <div><p class="mode-label">额度</p><h2>生成新邀请码</h2></div>
+          <form class="invite-create" id="invite-create-form">
+            <label>数量 <input name="count" type="number" min="1" max="20" value="5" /></label>
+            <label>每人项目数 <input name="maxProjects" type="number" min="1" max="10" value="3" /></label>
+            <button class="action action--secondary" type="submit">生成</button>
+          </form>
+          <textarea id="new-invite-codes" rows="5" readonly hidden aria-label="新生成的邀请码"></textarea>
+          <p class="field-help" id="invite-create-message" role="status" hidden></p>
+        </section>
+
+        <section class="beta-panel">
+          <div><p class="mode-label">人工复核</p><h2>待处理内容</h2></div>
+          <div class="review-list" id="review-list"></div>
+        </section>
+
+        <section class="beta-panel">
+          <div><p class="mode-label">真实反馈</p><h2>试玩记录</h2></div>
+          <div class="review-list" id="playtest-list"></div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/beta.js"></script>
+  </body>
+</html>

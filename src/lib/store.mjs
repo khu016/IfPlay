@@ -54,7 +54,7 @@ export class ProjectStore {
   constructor(dataDir) {
     this.dataDir = path.resolve(dataDir);
     this.stateFile = path.join(this.dataDir, 'state.json');
-    this.state = { projects: {}, tasks: {}, versions: {} };
+    this.state = { projects: {}, tasks: {}, versions: {}, beta: this.emptyBetaState() };
     this.writeChain = Promise.resolve();
   }
 
@@ -66,6 +66,16 @@ export class ProjectStore {
       if (error.code !== 'ENOENT') throw error;
       await this.persist();
     }
+    if (!this.state.beta) this.state.beta = this.emptyBetaState();
+    this.state.beta.invites ??= {};
+    this.state.beta.testers ??= {};
+    this.state.beta.moderation ??= {};
+    this.state.beta.playtests ??= [];
+    this.state.beta.adminTokenHash ??= null;
+  }
+
+  emptyBetaState() {
+    return { invites: {}, testers: {}, moderation: {}, playtests: [], adminTokenHash: null };
   }
 
   async persist() {
@@ -77,7 +87,17 @@ export class ProjectStore {
     return this.writeChain;
   }
 
-  async createProject(idea) {
+  async createProject(idea, { testerId = null } = {}) {
+    let tester = null;
+    if (testerId) {
+      tester = this.state.beta.testers[testerId];
+      if (!tester || tester.status !== 'active') {
+        throw new AppError('BETA_ACCESS_DENIED', '测试资格无效。', 403);
+      }
+      if (tester.projectCount >= tester.maxProjects) {
+        throw new AppError('BETA_QUOTA_EXHAUSTED', '这个邀请码的项目额度已经用完。', 409);
+      }
+    }
     const id = randomUUID();
     const token = randomBytes(24).toString('base64url');
     const createdAt = now();
@@ -85,6 +105,7 @@ export class ProjectStore {
       id,
       idea,
       tokenHash: tokenHash(token),
+      betaTesterId: testerId,
       status: 'draft',
       currentVersionId: null,
       nextVersionNumber: 1,
@@ -108,6 +129,10 @@ export class ProjectStore {
     };
     this.state.projects[id] = project;
     this.state.versions[id] = [];
+    if (tester) {
+      tester.projectCount += 1;
+      tester.updatedAt = createdAt;
+    }
     await this.persist();
     return { project: this.publicProject(project), token };
   }
@@ -158,8 +183,208 @@ export class ProjectStore {
   }
 
   publicProject(project) {
-    const { tokenHash: ignored, ...safeProject } = project;
+    const { tokenHash: ignored, betaTesterId: ignoredTester, ...safeProject } = project;
     return safeProject;
+  }
+
+  async setupBeta({ count = 20, maxProjects = 3 } = {}) {
+    if (Object.keys(this.state.beta.invites).length > 0 || Object.keys(this.state.beta.testers).length > 0) {
+      throw new AppError('BETA_ALREADY_CONFIGURED', '邀请测试已经初始化，请从测试后台查看现有进度。', 409);
+    }
+    if (!Number.isInteger(count) || count < 1 || count > 20) {
+      throw new AppError('INVITE_COUNT_INVALID', '邀请码数量必须是 1 到 20。');
+    }
+    if (!Number.isInteger(maxProjects) || maxProjects < 1 || maxProjects > 10) {
+      throw new AppError('INVITE_QUOTA_INVALID', '每个邀请码的项目额度必须是 1 到 10。');
+    }
+    const adminToken = randomBytes(24).toString('base64url');
+    this.state.beta.adminTokenHash = tokenHash(adminToken);
+    const codes = [];
+    for (let index = 0; index < count; index += 1) {
+      const raw = randomBytes(6).toString('hex').toUpperCase();
+      const code = `IFP-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+      const id = randomUUID();
+      this.state.beta.invites[id] = {
+        id,
+        codeHash: tokenHash(code),
+        status: 'active',
+        maxProjects,
+        redeemedBy: null,
+        createdAt: now(),
+        redeemedAt: null,
+      };
+      codes.push(code);
+    }
+    await this.persist();
+    return { adminToken, codes, maxProjects };
+  }
+
+  async createInvites(count, maxProjects) {
+    if (!Number.isInteger(count) || count < 1 || count > 20) {
+      throw new AppError('INVITE_COUNT_INVALID', '邀请码数量必须是 1 到 20。');
+    }
+    if (!Number.isInteger(maxProjects) || maxProjects < 1 || maxProjects > 10) {
+      throw new AppError('INVITE_QUOTA_INVALID', '每个邀请码的项目额度必须是 1 到 10。');
+    }
+    const occupiedSeats = Object.values(this.state.beta.invites)
+      .filter((item) => ['active', 'redeemed'].includes(item.status)).length;
+    if (occupiedSeats + count > 20) {
+      throw new AppError('BETA_CAPACITY_EXCEEDED', `本轮最多 20 位测试者，目前还可新增 ${Math.max(0, 20 - occupiedSeats)} 个邀请码。`, 409);
+    }
+    const codes = [];
+    for (let index = 0; index < count; index += 1) {
+      const raw = randomBytes(6).toString('hex').toUpperCase();
+      const code = `IFP-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+      const id = randomUUID();
+      this.state.beta.invites[id] = {
+        id,
+        codeHash: tokenHash(code),
+        status: 'active',
+        maxProjects,
+        redeemedBy: null,
+        createdAt: now(),
+        redeemedAt: null,
+      };
+      codes.push(code);
+    }
+    await this.persist();
+    return { codes, maxProjects };
+  }
+
+  async redeemInvite(code) {
+    const codeDigest = tokenHash(code.trim().toUpperCase());
+    const invite = Object.values(this.state.beta.invites).find((item) => item.codeHash === codeDigest);
+    if (!invite || invite.status !== 'active') {
+      throw new AppError('INVITE_INVALID', '邀请码无效或已经使用。', 403);
+    }
+    const token = randomBytes(24).toString('base64url');
+    const createdAt = now();
+    const tester = {
+      id: randomUUID(),
+      inviteId: invite.id,
+      tokenHash: tokenHash(token),
+      status: 'active',
+      projectCount: 0,
+      maxProjects: invite.maxProjects,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    this.state.beta.testers[tester.id] = tester;
+    invite.status = 'redeemed';
+    invite.redeemedBy = tester.id;
+    invite.redeemedAt = createdAt;
+    await this.persist();
+    return { tester: this.publicTester(tester), token };
+  }
+
+  authorizeBeta(token) {
+    const digest = token ? tokenHash(token) : '';
+    const tester = Object.values(this.state.beta.testers).find((item) => item.tokenHash === digest);
+    if (!tester || tester.status !== 'active') {
+      throw new AppError('BETA_ACCESS_DENIED', '请先输入有效邀请码。', 403);
+    }
+    return tester;
+  }
+
+  authorizeAdmin(token) {
+    const expectedHex = this.state.beta.adminTokenHash;
+    const actualHex = token ? tokenHash(token) : '';
+    if (!expectedHex) throw new AppError('BETA_ADMIN_NOT_CONFIGURED', '测试后台尚未初始化。', 503);
+    const expected = Buffer.from(expectedHex, 'hex');
+    const actual = Buffer.from(actualHex, 'hex');
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      throw new AppError('BETA_ADMIN_ACCESS_DENIED', '测试后台凭证无效。', 403);
+    }
+  }
+
+  publicTester(tester) {
+    return {
+      id: tester.id,
+      status: tester.status,
+      projectCount: tester.projectCount,
+      maxProjects: tester.maxProjects,
+      remainingProjects: Math.max(0, tester.maxProjects - tester.projectCount),
+      createdAt: tester.createdAt,
+    };
+  }
+
+  getBetaSummary() {
+    const invites = Object.values(this.state.beta.invites);
+    const testers = Object.values(this.state.beta.testers);
+    const moderation = Object.values(this.state.beta.moderation);
+    return {
+      invites: {
+        total: invites.length,
+        active: invites.filter((item) => item.status === 'active').length,
+        redeemed: invites.filter((item) => item.status === 'redeemed').length,
+      },
+      testers: testers.map((item) => this.publicTester(item)),
+      projects: Object.values(this.state.projects).filter((project) => project.betaTesterId).length,
+      moderation: moderation.map(({ text, ...item }) => ({ ...item, text })),
+      playtests: this.state.beta.playtests,
+    };
+  }
+
+  findApprovedModeration({ digest, kind, testerId = null, projectId = null }) {
+    return Object.values(this.state.beta.moderation).some((item) =>
+      item.digest === digest
+      && item.kind === kind
+      && item.status === 'approved'
+      && item.testerId === testerId
+      && item.projectId === projectId);
+  }
+
+  async recordModeration({ kind, text, result, testerId = null, projectId = null }) {
+    const id = randomUUID();
+    const createdAt = now();
+    const item = {
+      id,
+      kind,
+      text,
+      digest: result.digest,
+      decision: result.decision,
+      reasons: result.reasons,
+      status: result.decision === 'review' ? 'pending' : result.decision,
+      testerId,
+      projectId,
+      createdAt,
+      resolvedAt: null,
+    };
+    this.state.beta.moderation[id] = item;
+    await this.persist();
+    return item;
+  }
+
+  async resolveModeration(id, decision) {
+    const item = this.state.beta.moderation[id];
+    if (!item) throw new AppError('MODERATION_NOT_FOUND', '审核记录不存在。', 404);
+    if (item.status !== 'pending') throw new AppError('MODERATION_ALREADY_RESOLVED', '审核记录已经处理。', 409);
+    if (!['approved', 'rejected'].includes(decision)) {
+      throw new AppError('MODERATION_DECISION_INVALID', '审核决定无效。');
+    }
+    item.status = decision;
+    item.resolvedAt = now();
+    await this.persist();
+    return item;
+  }
+
+  async savePlaytest(projectId, input, testerId = null) {
+    const project = this.getProject(projectId);
+    const createdAt = now();
+    const item = {
+      id: randomUUID(),
+      projectId,
+      testerId: project.betaTesterId ?? testerId,
+      outcome: input.outcome,
+      rating: input.rating,
+      notes: input.notes,
+      device: input.device,
+      createdAt,
+    };
+    this.state.beta.playtests.push(item);
+    this.state.beta.playtests = this.state.beta.playtests.slice(-200);
+    await this.persist();
+    return item;
   }
 
   publicVersion(project, version) {

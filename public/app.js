@@ -1,7 +1,15 @@
 const storageKey = 'ifplay.project';
+const betaStorageKey = 'ifplay.beta';
 
 const elements = {
   serviceState: document.querySelector('#service-state'),
+  inviteGate: document.querySelector('#invite-gate'),
+  inviteForm: document.querySelector('#invite-form'),
+  inviteCode: document.querySelector('#invite-code'),
+  inviteButton: document.querySelector('#invite-button'),
+  inviteMessage: document.querySelector('#invite-message'),
+  appShell: document.querySelector('#app-shell'),
+  appFooter: document.querySelector('#app-footer'),
   ideaForm: document.querySelector('#idea-form'),
   idea: document.querySelector('#idea'),
   ideaHelp: document.querySelector('#idea-help'),
@@ -77,9 +85,15 @@ const elements = {
   generatorLabel: document.querySelector('#generator-label'),
   historyButton: document.querySelector('#history-button'),
   returnCurrentButton: document.querySelector('#return-current-button'),
+  playtestForm: document.querySelector('#playtest-form'),
+  playtestRating: document.querySelector('#playtest-rating'),
+  playtestNotes: document.querySelector('#playtest-notes'),
+  playtestButton: document.querySelector('#playtest-button'),
+  playtestMessage: document.querySelector('#playtest-message'),
 };
 
 let session = loadSession();
+let betaSession = loadBetaSession();
 let currentProject = null;
 let currentPlanning = null;
 let selectedProposalId = null;
@@ -105,10 +119,25 @@ function saveSession(value) {
   localStorage.setItem(storageKey, JSON.stringify(value));
 }
 
+function loadBetaSession() {
+  try {
+    return JSON.parse(localStorage.getItem(betaStorageKey)) ?? null;
+  } catch {
+    localStorage.removeItem(betaStorageKey);
+    return null;
+  }
+}
+
+function saveBetaSession(value) {
+  betaSession = value;
+  localStorage.setItem(betaStorageKey, JSON.stringify(value));
+}
+
 async function api(path, options = {}) {
   const headers = new Headers(options.headers);
   if (options.body) headers.set('content-type', 'application/json');
   if (session?.token) headers.set('x-project-token', session.token);
+  if (betaSession?.token) headers.set('x-beta-token', betaSession.token);
   const response = await fetch(path, { ...options, headers });
   const contentType = response.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json')
@@ -797,15 +826,75 @@ async function checkService() {
     elements.serviceState.dataset.state = 'ready';
     elements.serviceState.querySelector('span:last-child').textContent =
       health.generatorMode === 'demo' ? '开发模式' : 'OpenGame 已连接';
+    return health;
   } catch {
     elements.serviceState.dataset.state = 'error';
     elements.serviceState.querySelector('span:last-child').textContent = '后端未连接';
+    return null;
+  }
+}
+
+function showInviteGate(message = '') {
+  elements.inviteGate.hidden = false;
+  elements.appShell.hidden = true;
+  elements.appFooter.hidden = true;
+  elements.inviteMessage.hidden = !message;
+  elements.inviteMessage.textContent = message;
+}
+
+function showApp() {
+  elements.inviteGate.hidden = true;
+  elements.appShell.hidden = false;
+  elements.appFooter.hidden = false;
+}
+
+async function ensureBetaAccess(health) {
+  if (!health?.beta?.enabled) {
+    showApp();
+    return true;
+  }
+  if (!betaSession?.token) {
+    showInviteGate();
+    return false;
+  }
+  try {
+    const { tester } = await api('/api/beta/session');
+    betaSession.tester = tester;
+    saveBetaSession(betaSession);
+    showApp();
+    return true;
+  } catch {
+    localStorage.removeItem(betaStorageKey);
+    betaSession = null;
+    showInviteGate('测试资格已失效，请重新输入邀请码。');
+    return false;
   }
 }
 
 elements.idea.addEventListener('blur', () => {
   ideaTouched = true;
   validateIdea();
+});
+
+elements.inviteForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const code = elements.inviteCode.value.trim().toUpperCase();
+  elements.inviteMessage.hidden = true;
+  setButtonState(elements.inviteButton, 'loading');
+  try {
+    const result = await api('/api/beta/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+    saveBetaSession(result);
+    showApp();
+    await restoreProject();
+  } catch (error) {
+    elements.inviteMessage.textContent = error.message;
+    elements.inviteMessage.hidden = false;
+  } finally {
+    setButtonState(elements.inviteButton, 'idle');
+  }
 });
 
 elements.idea.addEventListener('input', () => {
@@ -982,6 +1071,40 @@ elements.modifyForm.addEventListener('submit', async (event) => {
   }
 });
 
+elements.playtestForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = new FormData(elements.playtestForm);
+  const outcome = form.get('outcome');
+  const rating = Number(form.get('rating'));
+  const notes = elements.playtestNotes.value.trim();
+  if (!outcome || !Number.isInteger(rating) || rating < 1 || rating > 5 || notes.length < 2) {
+    elements.playtestMessage.textContent = '请选择结果和评分，并写下一条具体感受。';
+    elements.playtestMessage.hidden = false;
+    return;
+  }
+  setButtonState(elements.playtestButton, 'loading');
+  elements.playtestMessage.hidden = true;
+  try {
+    await api(`/api/projects/${session.projectId}/playtests`, {
+      method: 'POST',
+      body: JSON.stringify({
+        outcome,
+        rating,
+        notes,
+        device: navigator.userAgent,
+      }),
+    });
+    elements.playtestForm.reset();
+    elements.playtestMessage.textContent = '试玩记录已保存，谢谢你说得这么具体。';
+    elements.playtestMessage.hidden = false;
+  } catch (error) {
+    elements.playtestMessage.textContent = error.message;
+    elements.playtestMessage.hidden = false;
+  } finally {
+    setButtonState(elements.playtestButton, 'idle');
+  }
+});
+
 elements.editFeedbackButton.addEventListener('click', () => {
   showFeedbackComposer();
   elements.instruction.focus();
@@ -1022,5 +1145,5 @@ elements.returnCurrentButton.addEventListener('click', async () => {
   await loadPlayableVersion(null, { keepHistory: true });
 });
 
-await checkService();
-await restoreProject();
+const health = await checkService();
+if (await ensureBetaAccess(health)) await restoreProject();
