@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env --watch src/server.mjs",
     "start": "node --env-file-if-exists=.env src/server.mjs",
+    "acceptance:stage10": "node --env-file-if-exists=.env scripts/stage10-acceptance.mjs",
     "setup:opengame": "npm --prefix vendor/opengame install && npm --prefix vendor/opengame run build",
     "test": "node --test test/*.test.mjs"
   }
