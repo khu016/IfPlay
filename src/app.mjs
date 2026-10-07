@@ -1,12 +1,13 @@
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { cp, readFile, readdir } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { AppError, errorBody } from './lib/errors.mjs';
 import { generateGame } from './lib/generator.mjs';
 import { planGame } from './lib/planner.mjs';
 import { TaskQueue } from './lib/queue.mjs';
 import { ProjectStore } from './lib/store.mjs';
+import { generateStyleBoard } from './lib/style-board.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(projectRoot, 'public');
@@ -145,12 +146,34 @@ function token(request) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function gameContractInstruction(contract) {
+  return [
+    `严格按照已确认的玩法合同“${contract.title}”生成第一版。`,
+    `玩家身份：${contract.playerRole}`,
+    `目标：${contract.goal}`,
+    `核心循环：${contract.coreLoop.join(' → ')}`,
+    `操作：${contract.controls}`,
+    `成功条件：${contract.successCondition}`,
+    `失败条件：${contract.failureCondition}`,
+    `单局时长：${contract.sessionLengthMinutes} 分钟。节奏：${contract.pace}。`,
+    `视觉方向：${contract.visualDirection}`,
+    `首版排除或简化：${contract.excludedFeatures.join('；')}`,
+    `锁定项：${contract.lockedFields.join('、')}。不得擅自改变。`,
+    `可调整项：${contract.flexibleFields.join('、')}。`,
+    `验收标准：${contract.acceptanceCriteria.join('；')}`,
+    `总图片预算最多 ${contract.imageBudget.maximum} 张，参考风格板已使用 ${contract.imageBudget.used} 张。`,
+    '不得增加合同中未确认的系统。',
+  ].join('\n');
+}
+
 export async function createIfPlayApp(options = {}) {
   const dataDir = options.dataDir ?? process.env.IFPLAY_DATA_DIR ?? '.data';
   const store = new ProjectStore(dataDir);
   await store.init();
   const planner = options.planner ?? planGame;
+  const styleBoardGenerator = options.styleBoardGenerator ?? generateStyleBoard;
   const planningProjects = new Set();
+  const styleBoardProjects = new Set();
   const concurrency = Number(options.concurrency ?? process.env.IFPLAY_MAX_CONCURRENT_TASKS ?? 2);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 2) {
     throw new Error('IFPLAY_MAX_CONCURRENT_TASKS 必须是 1 或 2');
@@ -267,6 +290,75 @@ export async function createIfPlayApp(options = {}) {
         return sendJson(response, 200, selected);
       }
 
+      const styleBoardMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/planning\/style-board$/);
+      if (request.method === 'POST' && styleBoardMatch) {
+        const project = store.authorizeProject(styleBoardMatch[1], token(request));
+        const planning = store.getPlanning(project.id);
+        if (planning.styleBoard.status === 'ready') {
+          return sendJson(response, 200, { planning });
+        }
+        if (styleBoardProjects.has(project.id)) {
+          throw new AppError('STYLE_BOARD_BUSY', 'AI 正在生成参考图，请稍后再试。', 409);
+        }
+        styleBoardProjects.add(project.id);
+        try {
+          await store.startStyleBoard(project.id);
+          const output = await styleBoardGenerator({ proposals: planning.proposals });
+          const outputDir = path.join(store.dataDir, 'projects', project.id, 'planning');
+          await mkdir(outputDir, { recursive: true });
+          await writeFile(path.join(outputDir, 'style-board.image'), output.buffer);
+          await store.completeStyleBoard(project.id, output.provider, output.contentType);
+          return sendJson(response, 200, { planning: store.getPlanning(project.id) });
+        } catch (error) {
+          await store.failStyleBoard(project.id, error);
+          throw error;
+        } finally {
+          styleBoardProjects.delete(project.id);
+        }
+      }
+
+      const styleBoardImageMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/planning\/style-board\/image$/,
+      );
+      if (request.method === 'GET' && styleBoardImageMatch) {
+        const project = store.authorizeProject(styleBoardImageMatch[1], token(request));
+        if (project.planning.styleBoard.status !== 'ready') {
+          throw new AppError('STYLE_BOARD_NOT_READY', '参考风格板尚未生成。', 409);
+        }
+        const body = await readFile(
+          path.join(store.dataDir, 'projects', project.id, 'planning', 'style-board.image'),
+        );
+        response.writeHead(200, {
+          'content-type': project.planning.styleBoard.mimeType ?? 'image/png',
+          'cache-control': 'private, no-store',
+          'x-content-type-options': 'nosniff',
+        });
+        return response.end(body);
+      }
+
+      const styleSelectionMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/planning\/style-selection$/,
+      );
+      if (request.method === 'POST' && styleSelectionMatch) {
+        const project = store.authorizeProject(styleSelectionMatch[1], token(request));
+        const body = await readJson(request);
+        const styleId = typeof body.styleId === 'string' ? body.styleId.trim() : '';
+        if (!/^style-[a-c]$/.test(styleId)) {
+          throw new AppError('STYLE_ID_INVALID', '请选择一个有效的画面方向。');
+        }
+        const planning = await store.selectStyle(project.id, styleId);
+        return sendJson(response, 200, { planning });
+      }
+
+      const contractMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/planning\/contract\/confirm$/,
+      );
+      if (request.method === 'POST' && contractMatch) {
+        const project = store.authorizeProject(contractMatch[1], token(request));
+        const planning = await store.confirmGameContract(project.id);
+        return sendJson(response, 200, { planning });
+      }
+
       const generationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/generations$/);
       if (request.method === 'POST' && generationMatch) {
         const project = store.authorizeProject(generationMatch[1], token(request));
@@ -274,7 +366,13 @@ export async function createIfPlayApp(options = {}) {
           throw new AppError('PROJECT_BUSY', '当前项目已有生成任务，请等待完成后再修改。', 409);
         }
         const body = await readJson(request);
-        const instruction = typeof body.instruction === 'string' ? body.instruction.trim() : '';
+        let instruction = typeof body.instruction === 'string' ? body.instruction.trim() : '';
+        if (!project.currentVersionId && project.planning?.proposals?.length > 0) {
+          if (project.planning.gameContract?.status !== 'confirmed') {
+            throw new AppError('GAME_CONTRACT_REQUIRED', '请先确认玩法合同，再生成游戏。', 409);
+          }
+          instruction = gameContractInstruction(project.planning.gameContract);
+        }
         if (instruction.length < 2 || instruction.length > 2000) {
           throw new AppError('INSTRUCTION_INVALID', '生成要求需要 2 到 2000 个字符。');
         }

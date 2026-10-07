@@ -11,6 +11,45 @@ function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex');
 }
 
+function emptyStyleBoard() {
+  return {
+    status: 'not_started',
+    imageUrl: null,
+    provider: null,
+    error: null,
+    generatedAt: null,
+  };
+}
+
+function createGameContract(proposal, styleProposal, styleId) {
+  return {
+    status: 'draft',
+    proposalId: proposal.id,
+    styleId,
+    title: proposal.name,
+    playerRole: proposal.playerRole,
+    goal: proposal.goal,
+    coreLoop: proposal.coreLoop,
+    controls: proposal.controls,
+    successCondition: proposal.successCondition,
+    failureCondition: proposal.failureCondition,
+    sessionLengthMinutes: proposal.sessionLengthMinutes,
+    pace: proposal.pace,
+    visualDirection: styleProposal.visualDirection,
+    imageBudget: { used: 1, remaining: 2, maximum: 3 },
+    excludedFeatures: proposal.simplifications,
+    lockedFields: ['核心循环', '成功条件', '失败条件', '视觉方向'],
+    flexibleFields: ['数值难度', '按钮尺寸', '反馈强度'],
+    acceptanceCriteria: [
+      '电脑和手机浏览器都能完成一轮核心玩法',
+      '开始、成功、失败和重新开始状态清楚可见',
+      '首版优先保证可玩，不增加未确认的系统',
+    ],
+    estimatedGenerationMinutes: 10,
+    confirmedAt: null,
+  };
+}
+
 export class ProjectStore {
   constructor(dataDir) {
     this.dataDir = path.resolve(dataDir);
@@ -55,6 +94,9 @@ export class ProjectStore {
         pendingQuestion: null,
         proposals: [],
         selectedProposalId: null,
+        styleBoard: emptyStyleBoard(),
+        selectedStyleId: null,
+        gameContract: null,
         provider: null,
         usageRecords: [],
         updatedAt: createdAt,
@@ -85,6 +127,13 @@ export class ProjectStore {
     }
     if (!Object.hasOwn(project.planning, 'selectedProposalId')) {
       project.planning.selectedProposalId = null;
+    }
+    if (!project.planning.styleBoard) project.planning.styleBoard = emptyStyleBoard();
+    if (!Object.hasOwn(project.planning, 'selectedStyleId')) {
+      project.planning.selectedStyleId = null;
+    }
+    if (!Object.hasOwn(project.planning, 'gameContract')) {
+      project.planning.gameContract = null;
     }
     if (!Array.isArray(project.planning.usageRecords)) {
       project.planning.usageRecords = project.planning.provider
@@ -144,12 +193,18 @@ export class ProjectStore {
       planning.pendingQuestion = result.question;
       planning.proposals = [];
       planning.selectedProposalId = null;
+      planning.styleBoard = emptyStyleBoard();
+      planning.selectedStyleId = null;
+      planning.gameContract = null;
       project.status = 'clarifying';
     } else {
       planning.status = 'proposal_ready';
       planning.pendingQuestion = null;
       planning.proposals = result.proposals;
       planning.selectedProposalId = null;
+      planning.styleBoard = emptyStyleBoard();
+      planning.selectedStyleId = null;
+      planning.gameContract = null;
       project.status = 'proposal_ready';
     }
     planning.provider = result.provider ?? null;
@@ -176,6 +231,10 @@ export class ProjectStore {
     const proposal = planning.proposals.find((item) => item.id === proposalId);
     if (!proposal) throw new AppError('PROPOSAL_NOT_FOUND', '选择的玩法提案不存在。', 404);
     const updatedAt = now();
+    if (planning.selectedProposalId !== proposal.id) {
+      planning.selectedStyleId = null;
+      planning.gameContract = null;
+    }
     planning.status = 'proposal_selected';
     planning.selectedProposalId = proposal.id;
     planning.updatedAt = updatedAt;
@@ -183,6 +242,93 @@ export class ProjectStore {
     project.updatedAt = updatedAt;
     await this.persist();
     return { planning, proposal };
+  }
+
+  async startStyleBoard(projectId) {
+    const project = this.getProject(projectId);
+    const planning = project.planning;
+    if (!planning.selectedProposalId) {
+      throw new AppError('PROPOSAL_REQUIRED', '请先确认一个玩法方向。', 409);
+    }
+    planning.styleBoard = {
+      ...emptyStyleBoard(),
+      status: 'generating',
+    };
+    planning.updatedAt = now();
+    project.status = 'style_generating';
+    project.updatedAt = planning.updatedAt;
+    await this.persist();
+    return planning.styleBoard;
+  }
+
+  async completeStyleBoard(projectId, provider, mimeType = 'image/png') {
+    const project = this.getProject(projectId);
+    const updatedAt = now();
+    project.planning.styleBoard = {
+      status: 'ready',
+      imageUrl: `/api/projects/${projectId}/planning/style-board/image`,
+      mimeType,
+      provider,
+      error: null,
+      generatedAt: updatedAt,
+    };
+    project.planning.updatedAt = updatedAt;
+    project.status = 'style_ready';
+    project.updatedAt = updatedAt;
+    await this.persist();
+    return project.planning.styleBoard;
+  }
+
+  async failStyleBoard(projectId, error) {
+    const project = this.getProject(projectId);
+    const updatedAt = now();
+    project.planning.styleBoard = {
+      ...emptyStyleBoard(),
+      status: 'failed',
+      error: { code: error.code ?? 'STYLE_BOARD_FAILED', message: error.message },
+    };
+    project.planning.updatedAt = updatedAt;
+    project.status = 'proposal_selected';
+    project.updatedAt = updatedAt;
+    await this.persist();
+  }
+
+  async selectStyle(projectId, styleId) {
+    const project = this.getProject(projectId);
+    const planning = project.planning;
+    if (planning.styleBoard.status !== 'ready') {
+      throw new AppError('STYLE_BOARD_NOT_READY', '参考风格板尚未生成。', 409);
+    }
+    const styleIndex = { 'style-a': 0, 'style-b': 1, 'style-c': 2 }[styleId];
+    const proposal = planning.proposals.find((item) => item.id === planning.selectedProposalId);
+    const styleProposal = planning.proposals[styleIndex];
+    if (!proposal || !styleProposal) {
+      throw new AppError('STYLE_NOT_FOUND', '选择的画面方向不存在。', 404);
+    }
+    const updatedAt = now();
+    planning.selectedStyleId = styleId;
+    planning.gameContract = createGameContract(proposal, styleProposal, styleId);
+    planning.updatedAt = updatedAt;
+    project.status = 'contract_draft';
+    project.updatedAt = updatedAt;
+    await this.persist();
+    return planning;
+  }
+
+  async confirmGameContract(projectId) {
+    const project = this.getProject(projectId);
+    const planning = project.planning;
+    if (!planning.gameContract || !planning.selectedStyleId) {
+      throw new AppError('GAME_CONTRACT_NOT_READY', '请先选择画面方向。', 409);
+    }
+    const updatedAt = now();
+    planning.gameContract.status = 'confirmed';
+    planning.gameContract.confirmedAt = updatedAt;
+    planning.updatedAt = updatedAt;
+    project.status = 'ready_to_generate';
+    project.updatedAt = updatedAt;
+    await this.persist();
+    return planning;
   }
 
   async createTask(projectId, kind, instruction) {

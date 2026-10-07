@@ -174,6 +174,89 @@ test('protects planning access and prevents concurrent planning calls', async (t
   assert.equal(deniedResponse.status, 403);
 });
 
+test('generates one style board, persists a visual choice, and requires contract confirmation', async (t) => {
+  let imageCalls = 0;
+  const styleBoardGenerator = async ({ proposals }) => {
+    imageCalls += 1;
+    assert.equal(proposals.length, 3);
+    return {
+      buffer: Buffer.from([137, 80, 78, 71]),
+      contentType: 'image/png',
+      provider: { provider: 'tongyi', model: 'test-wanx', taskId: 'task-1', usage: { image_count: 1 } },
+    };
+  };
+  const app = await startApp({ styleBoardGenerator });
+  t.after(() => app.server.close());
+  const created = await app.store.createProject('做一个雨夜纸飞机小游戏');
+  await app.store.savePlanningResult(created.project.id, {
+    kind: 'proposals',
+    proposals: [
+      { id: 'proposal-a', ...proposal('雨夜拾光', '自由收集', 'relaxed') },
+      { id: 'proposal-b', ...proposal('霓虹穿环', '节奏穿环', 'intense') },
+      { id: 'proposal-c', ...proposal('记忆航线', '路线选择', 'balanced') },
+    ],
+  });
+  await app.store.selectProposal(created.project.id, 'proposal-b');
+  const headers = { 'content-type': 'application/json', 'x-project-token': created.token };
+
+  const blockedGeneration = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/generations`,
+    { method: 'POST', headers, body: JSON.stringify({ instruction: '跳过确认' }) },
+  );
+  assert.equal(blockedGeneration.status, 409);
+  assert.equal((await blockedGeneration.json()).error.code, 'GAME_CONTRACT_REQUIRED');
+
+  const styleResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/planning/style-board`,
+    { method: 'POST', headers, body: '{}' },
+  );
+  const styled = await styleResponse.json();
+  assert.equal(styleResponse.status, 200);
+  assert.equal(styled.planning.styleBoard.status, 'ready');
+  assert.equal(imageCalls, 1);
+
+  const repeatStyleResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/planning/style-board`,
+    { method: 'POST', headers, body: '{}' },
+  );
+  assert.equal(repeatStyleResponse.status, 200);
+  assert.equal(imageCalls, 1);
+
+  const imageResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/planning/style-board/image`,
+    { headers: { 'x-project-token': created.token } },
+  );
+  assert.equal(imageResponse.status, 200);
+  assert.equal(imageResponse.headers.get('content-type'), 'image/png');
+  assert.equal((await imageResponse.arrayBuffer()).byteLength, 4);
+
+  const styleSelection = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/planning/style-selection`,
+    { method: 'POST', headers, body: JSON.stringify({ styleId: 'style-c' }) },
+  );
+  const selected = await styleSelection.json();
+  assert.equal(selected.planning.selectedStyleId, 'style-c');
+  assert.equal(selected.planning.gameContract.status, 'draft');
+  assert.equal(selected.planning.gameContract.visualDirection, selected.planning.proposals[2].visualDirection);
+  assert.deepEqual(selected.planning.gameContract.imageBudget, { used: 1, remaining: 2, maximum: 3 });
+
+  const confirmedResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/planning/contract/confirm`,
+    { method: 'POST', headers, body: '{}' },
+  );
+  const confirmed = await confirmedResponse.json();
+  assert.equal(confirmed.planning.gameContract.status, 'confirmed');
+
+  const generationResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/generations`,
+    { method: 'POST', headers, body: JSON.stringify({ instruction: '客户端伪造的要求' }) },
+  );
+  const generation = await generationResponse.json();
+  assert.equal(generationResponse.status, 202);
+  assert.match(generation.task.instruction, /严格按照已确认的玩法合同/);
+  assert.doesNotMatch(generation.task.instruction, /客户端伪造/);
+});
+
 async function waitForTask(baseUrl, taskId, token) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const response = await fetch(`${baseUrl}/api/tasks/${taskId}`, {

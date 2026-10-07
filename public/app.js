@@ -27,6 +27,27 @@ const elements = {
   proposalList: document.querySelector('#proposal-list'),
   proposalSelectionHelp: document.querySelector('#proposal-selection-help'),
   confirmProposalButton: document.querySelector('#confirm-proposal-button'),
+  styleBoard: document.querySelector('#style-board'),
+  styleBoardLoading: document.querySelector('#style-board-loading'),
+  styleBoardFigure: document.querySelector('#style-board-figure'),
+  styleBoardImage: document.querySelector('#style-board-image'),
+  styleOptions: document.querySelector('#style-options'),
+  styleSelectionHelp: document.querySelector('#style-selection-help'),
+  retryStyleButton: document.querySelector('#retry-style-button'),
+  confirmStyleButton: document.querySelector('#confirm-style-button'),
+  contractBoard: document.querySelector('#contract-board'),
+  contractRole: document.querySelector('#contract-role'),
+  contractGoal: document.querySelector('#contract-goal'),
+  contractControls: document.querySelector('#contract-controls'),
+  contractDuration: document.querySelector('#contract-duration'),
+  contractLoop: document.querySelector('#contract-loop'),
+  contractEnding: document.querySelector('#contract-ending'),
+  contractVisual: document.querySelector('#contract-visual'),
+  contractLocked: document.querySelector('#contract-locked'),
+  contractBudget: document.querySelector('#contract-budget'),
+  contractAcceptance: document.querySelector('#contract-acceptance'),
+  changeStyleButton: document.querySelector('#change-style-button'),
+  confirmContractButton: document.querySelector('#confirm-contract-button'),
   modifyPanel: document.querySelector('#modify-panel'),
   modifyForm: document.querySelector('#modify-form'),
   instruction: document.querySelector('#instruction'),
@@ -47,6 +68,8 @@ let session = loadSession();
 let currentProject = null;
 let currentPlanning = null;
 let selectedProposalId = null;
+let selectedStyleId = null;
+let styleBoardObjectUrl = null;
 let ideaTouched = false;
 
 function loadSession() {
@@ -102,12 +125,18 @@ function setEmptyPreview(title, detail) {
 
 function showPreviewPlaceholder(title = '你的游戏会出现在这里', detail = '确认玩法后生成第一版，再直接试玩。') {
   elements.previewTitle.textContent = '你的游戏会出现在这里';
-  elements.proposalBoard.hidden = true;
+  hidePreviewFlowPanels();
   elements.previewStage.hidden = false;
   elements.emptyPreview.hidden = false;
   elements.gameFrame.hidden = true;
   elements.versionStrip.hidden = true;
   setEmptyPreview(title, detail);
+}
+
+function hidePreviewFlowPanels() {
+  elements.proposalBoard.hidden = true;
+  elements.styleBoard.hidden = true;
+  elements.contractBoard.hidden = true;
 }
 
 function hideCreationPanels() {
@@ -172,10 +201,9 @@ function showPlan(project, proposal) {
   elements.planDuration.textContent = `${proposal.sessionLengthMinutes} 分钟 · ${paceLabel(proposal.pace)}节奏`;
   renderCoreLoop(elements.planLoop, proposal.coreLoop);
   selectedProposalId = proposal.id;
-  showPreviewPlaceholder(
-    '玩法方向已经选好。',
-    `接下来会按“${proposal.name}”生成第一版，完成后可以在这里直接试玩。`,
-  );
+  const confirmed = currentPlanning?.gameContract?.status === 'confirmed';
+  elements.generateButton.disabled = !confirmed;
+  elements.generateButton.textContent = confirmed ? '生成第一版游戏' : '确认玩法合同后生成';
 }
 
 function setPlanningBusy(busy, text = 'AI 正在整理玩法') {
@@ -191,7 +219,7 @@ function setPlanningBusy(busy, text = 'AI 正在整理玩法') {
 function showQuestion(planning) {
   hideCreationPanels();
   elements.questionPanel.hidden = false;
-  elements.proposalBoard.hidden = true;
+  hidePreviewFlowPanels();
   elements.previewStage.hidden = false;
   elements.emptyPreview.hidden = false;
   elements.gameFrame.hidden = true;
@@ -290,6 +318,7 @@ function createProposalOption(proposal, index) {
 
 function showProposals(planning) {
   hideCreationPanels();
+  hidePreviewFlowPanels();
   elements.previewTitle.textContent = '比较三个玩法方向';
   elements.previewStage.hidden = true;
   elements.proposalBoard.hidden = false;
@@ -306,11 +335,104 @@ function showProposals(planning) {
     : '选择一个方向后继续。';
 }
 
+function createStyleOption(proposal, index) {
+  const styleId = `style-${String.fromCharCode(97 + index)}`;
+  const label = document.createElement('label');
+  label.className = 'style-option';
+  const input = document.createElement('input');
+  input.type = 'radio';
+  input.name = 'style';
+  input.value = styleId;
+  input.checked = styleId === selectedStyleId;
+  input.addEventListener('change', () => {
+    selectedStyleId = styleId;
+    elements.confirmStyleButton.disabled = false;
+    elements.styleSelectionHelp.textContent = `已选择 ${String.fromCharCode(65 + index)}：${proposal.visualDirection}`;
+  });
+  const body = document.createElement('span');
+  body.className = 'style-option__body';
+  const title = document.createElement('strong');
+  title.textContent = `${String.fromCharCode(65 + index)} · ${proposal.name}`;
+  const copy = document.createElement('small');
+  copy.textContent = proposal.visualDirection;
+  body.append(title, copy);
+  label.append(input, body);
+  return label;
+}
+
+async function loadStyleBoardImage(imageUrl) {
+  const response = await fetch(`${imageUrl}?v=${encodeURIComponent(currentPlanning.styleBoard.generatedAt ?? '')}`, {
+    headers: { 'x-project-token': session.token },
+  });
+  if (!response.ok) throw new Error('参考图暂时无法打开，请重新生成。');
+  const blob = await response.blob();
+  if (styleBoardObjectUrl) URL.revokeObjectURL(styleBoardObjectUrl);
+  styleBoardObjectUrl = URL.createObjectURL(blob);
+  elements.styleBoardImage.style.backgroundImage = `url("${styleBoardObjectUrl}")`;
+}
+
+function showStyleBoard(planning) {
+  hidePreviewFlowPanels();
+  elements.previewStage.hidden = true;
+  elements.versionStrip.hidden = true;
+  elements.styleBoard.hidden = false;
+  elements.previewTitle.textContent = '比较三个画面方向';
+  const ready = planning.styleBoard?.status === 'ready';
+  const failed = planning.styleBoard?.status === 'failed';
+  const generating = planning.styleBoard?.status === 'generating';
+  elements.styleBoardLoading.hidden = !generating;
+  elements.styleBoardFigure.hidden = !ready;
+  elements.styleOptions.hidden = !ready;
+  elements.retryStyleButton.hidden = !failed && planning.styleBoard?.status !== 'not_started';
+  elements.retryStyleButton.textContent = failed ? '重新生成参考图' : '生成参考图';
+  elements.confirmStyleButton.hidden = !ready;
+  if (!ready) {
+    elements.styleSelectionHelp.textContent = failed
+      ? planning.styleBoard.error?.message ?? '参考图生成失败，可以重新尝试。'
+      : '正在生成一张三分区参考图，不会重复扣费。';
+    return;
+  }
+  selectedStyleId = planning.selectedStyleId ?? selectedStyleId;
+  elements.styleOptions.replaceChildren();
+  planning.proposals.forEach((proposal, index) => {
+    elements.styleOptions.append(createStyleOption(proposal, index));
+  });
+  elements.confirmStyleButton.disabled = !selectedStyleId;
+  elements.styleSelectionHelp.textContent = selectedStyleId
+    ? `已选择 ${selectedStyleId.slice(-1).toUpperCase()} 方向。`
+    : '选择一个画面方向后继续。';
+  loadStyleBoardImage(planning.styleBoard.imageUrl).catch((error) => showMessage(error.message));
+}
+
+function showContract(planning) {
+  const contract = planning.gameContract;
+  hidePreviewFlowPanels();
+  elements.previewStage.hidden = true;
+  elements.versionStrip.hidden = true;
+  elements.contractBoard.hidden = false;
+  elements.previewTitle.textContent = contract.status === 'confirmed' ? '玩法合同已确认' : '确认后再开始生成';
+  elements.contractRole.textContent = contract.playerRole;
+  elements.contractGoal.textContent = contract.goal;
+  elements.contractControls.textContent = contract.controls;
+  elements.contractDuration.textContent = `${contract.sessionLengthMinutes} 分钟 · ${paceLabel(contract.pace)}节奏`;
+  elements.contractLoop.textContent = contract.coreLoop.join(' → ');
+  elements.contractEnding.textContent = `成功：${withoutFinalPunctuation(contract.successCondition)}；失败：${withoutFinalPunctuation(contract.failureCondition)}`;
+  elements.contractVisual.textContent = contract.visualDirection;
+  elements.contractLocked.textContent = contract.lockedFields.join('、');
+  elements.contractBudget.textContent = `最多 ${contract.imageBudget.maximum} 张；参考图已用 ${contract.imageBudget.used} 张，还可用 ${contract.imageBudget.remaining} 张`;
+  elements.contractAcceptance.textContent = contract.acceptanceCriteria.join('；');
+  elements.confirmContractButton.disabled = contract.status === 'confirmed';
+  elements.confirmContractButton.textContent = contract.status === 'confirmed' ? '合同已确认' : '确认合同';
+}
+
 function renderPlanning(planning) {
   currentPlanning = planning;
   if (planning.selectedProposalId) selectedProposalId = planning.selectedProposalId;
-  if (planning.status === 'proposal_selected' && selectedProposal()) {
+  if (planning.selectedStyleId) selectedStyleId = planning.selectedStyleId;
+  if (planning.selectedProposalId && selectedProposal()) {
     showPlan(currentProject, selectedProposal());
+    if (planning.gameContract) showContract(planning);
+    else showStyleBoard(planning);
   } else if (planning.proposals.length > 0) {
     showProposals(planning);
   } else if (planning.pendingQuestion) {
@@ -334,6 +456,32 @@ async function continuePlanning(answer) {
     showMessage(`${error.message} 可以稍后重试，不会丢失已经保存的回答。`);
   } finally {
     setPlanningBusy(false);
+  }
+}
+
+async function generateStyleBoardFlow() {
+  clearMessage();
+  elements.styleBoardLoading.hidden = false;
+  elements.styleBoardFigure.hidden = true;
+  elements.styleOptions.hidden = true;
+  elements.retryStyleButton.hidden = true;
+  elements.confirmStyleButton.hidden = true;
+  elements.styleSelectionHelp.textContent = '正在生成一张三分区参考图，不会重复扣费。';
+  showTask('running', 'style');
+  elements.taskStateText.textContent = '正在生成参考图';
+  try {
+    const { planning } = await api(`/api/projects/${session.projectId}/planning/style-board`, {
+      method: 'POST',
+      body: '{}',
+    });
+    currentPlanning = planning;
+    elements.taskState.hidden = true;
+    renderPlanning(planning);
+  } catch (error) {
+    elements.taskState.hidden = true;
+    const { planning } = await api(`/api/projects/${session.projectId}/planning`).catch(() => ({ planning: currentPlanning }));
+    if (planning) renderPlanning(planning);
+    showMessage(`${error.message} 可以重新生成参考图，已经确认的玩法不会丢失。`);
   }
 }
 
@@ -407,7 +555,7 @@ async function loadPlayableVersion() {
   });
   if (!previewResponse.ok) throw new Error('试玩内容暂时无法打开。请重新生成。');
   hideCreationPanels();
-  elements.proposalBoard.hidden = true;
+  hidePreviewFlowPanels();
   elements.previewStage.hidden = false;
   elements.previewTitle.textContent = '你的游戏已经可以试玩';
   elements.gameFrame.hidden = false;
@@ -497,6 +645,7 @@ elements.ideaForm.addEventListener('submit', async (event) => {
       currentProject = created.project;
       currentPlanning = created.project.planning;
       selectedProposalId = null;
+      selectedStyleId = null;
       saveSession({ projectId: created.project.id, token: created.token });
     }
     await continuePlanning();
@@ -532,7 +681,9 @@ elements.confirmProposalButton.addEventListener('click', async () => {
     });
     currentPlanning = selected.planning;
     selectedProposalId = selected.proposal.id;
-    showPlan(currentProject, selected.proposal);
+    selectedStyleId = null;
+    renderPlanning(selected.planning);
+    await generateStyleBoardFlow();
   } catch (error) {
     showMessage(error.message);
   } finally {
@@ -544,6 +695,46 @@ elements.reselectProposalButton.addEventListener('click', () => {
   if (currentPlanning?.proposals?.length) showProposals(currentPlanning);
 });
 
+elements.retryStyleButton.addEventListener('click', generateStyleBoardFlow);
+
+elements.confirmStyleButton.addEventListener('click', async () => {
+  if (!selectedStyleId) return;
+  clearMessage();
+  setButtonState(elements.confirmStyleButton, 'loading');
+  try {
+    const { planning } = await api(`/api/projects/${session.projectId}/planning/style-selection`, {
+      method: 'POST',
+      body: JSON.stringify({ styleId: selectedStyleId }),
+    });
+    renderPlanning(planning);
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    setButtonState(elements.confirmStyleButton, 'idle');
+  }
+});
+
+elements.changeStyleButton.addEventListener('click', () => {
+  if (currentPlanning?.styleBoard?.status === 'ready') showStyleBoard(currentPlanning);
+});
+
+elements.confirmContractButton.addEventListener('click', async () => {
+  clearMessage();
+  setButtonState(elements.confirmContractButton, 'loading');
+  try {
+    const { planning } = await api(`/api/projects/${session.projectId}/planning/contract/confirm`, {
+      method: 'POST',
+      body: '{}',
+    });
+    renderPlanning(planning);
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    setButtonState(elements.confirmContractButton, 'idle');
+    elements.confirmContractButton.disabled = currentPlanning?.gameContract?.status === 'confirmed';
+  }
+});
+
 elements.editIdeaButton.addEventListener('click', () => {
   hideCreationPanels();
   elements.ideaForm.hidden = false;
@@ -552,12 +743,11 @@ elements.editIdeaButton.addEventListener('click', () => {
 });
 
 elements.generateButton.addEventListener('click', () => {
-  const proposal = selectedProposal();
-  if (!proposal) {
-    showMessage('请先选择一个玩法方向。');
+  if (currentPlanning?.gameContract?.status !== 'confirmed') {
+    showMessage('请先确认玩法合同。');
     return;
   }
-  createGeneration(proposalInstruction(proposal), elements.generateButton);
+  createGeneration('按已确认的玩法合同生成第一版。', elements.generateButton);
 });
 
 elements.modifyForm.addEventListener('submit', async (event) => {

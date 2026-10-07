@@ -90,7 +90,7 @@
             <div><dt>单局</dt><dd id="plan-duration"></dd></div>
           </dl>
           <ul class="core-loop" id="plan-loop" aria-label="核心玩法循环"></ul>
-          <button class="action action--primary" id="generate-button" type="button">用这个玩法生成</button>
+          <button class="action action--primary" id="generate-button" type="button" disabled>确认玩法合同后生成</button>
         </section>
 
         <section class="modify-panel" id="modify-panel" hidden aria-labelledby="modify-title">
@@ -139,6 +139,52 @@
             <button class="action action--primary" id="confirm-proposal-button" type="button" disabled>
               确认这个方向
             </button>
+          </div>
+        </section>
+
+        <section class="style-board" id="style-board" hidden aria-labelledby="style-title">
+          <div class="style-board__intro">
+            <h3 id="style-title">选一种画面感觉</h3>
+            <p>这是一张概念参考图，不是最终游戏截图。A、B、C 三个分区分别对应刚才的三种视觉方向。</p>
+          </div>
+          <div class="style-board__loading" id="style-board-loading" hidden>
+            <span class="task-state__spinner" aria-hidden="true"></span>
+            <div><strong>万相正在画参考图</strong><small>只生成一张三分区图片，通常需要几十秒。</small></div>
+          </div>
+          <figure class="style-board__figure" id="style-board-figure" hidden>
+            <div id="style-board-image" role="img" aria-label="三个画面方向组成的游戏概念参考图"></div>
+            <figcaption><span>A</span><span>B</span><span>C</span></figcaption>
+          </figure>
+          <div class="style-options" id="style-options" aria-label="画面方向"></div>
+          <div class="style-board__actions">
+            <p id="style-selection-help">选择一个画面方向后继续。</p>
+            <button class="text-action" id="retry-style-button" type="button" hidden>重新生成参考图</button>
+            <button class="action action--primary" id="confirm-style-button" type="button" disabled>采用这个画面</button>
+          </div>
+        </section>
+
+        <section class="contract-board" id="contract-board" hidden aria-labelledby="contract-title">
+          <div class="contract-board__intro">
+            <h3 id="contract-title">最后确认玩法合同</h3>
+            <p>确认后，AI 只按这份合同做第一版；锁定项不会被擅自改掉。</p>
+          </div>
+          <dl class="contract-grid">
+            <div><dt>玩家身份</dt><dd id="contract-role"></dd></div>
+            <div><dt>目标</dt><dd id="contract-goal"></dd></div>
+            <div><dt>操作</dt><dd id="contract-controls"></dd></div>
+            <div><dt>单局</dt><dd id="contract-duration"></dd></div>
+            <div class="contract-grid__wide"><dt>核心循环</dt><dd id="contract-loop"></dd></div>
+            <div class="contract-grid__wide"><dt>怎样结束</dt><dd id="contract-ending"></dd></div>
+            <div class="contract-grid__wide"><dt>画面方向</dt><dd id="contract-visual"></dd></div>
+          </dl>
+          <div class="contract-notes">
+            <p><strong>锁定</strong><span id="contract-locked"></span></p>
+            <p><strong>图片预算</strong><span id="contract-budget"></span></p>
+            <p><strong>首版标准</strong><span id="contract-acceptance"></span></p>
+          </div>
+          <div class="contract-board__actions">
+            <button class="text-action" id="change-style-button" type="button">返回换画面</button>
+            <button class="action action--primary" id="confirm-contract-button" type="button">确认合同</button>
           </div>
         </section>
 

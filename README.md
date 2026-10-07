@@ -28,7 +28,8 @@ IfPlay 面向不会编程的普通用户和内容创作者。用户用中文描�
 - [x] 完成 DeepSeek + OpenGame 真实生成验收。
 - [x] 完成 DeepSeek 结构化玩法策划后端与真实接口验证。
 - [x] 完成关键问题、三个玩法提案和选择恢复的前端界面。
-- [ ] 完成三分区参考风格板和玩法契约确认。
+- [x] 完成三分区参考风格板和玩法契约确认。
+- [ ] 完成结构化试玩反馈和定向修改。
 
 项目状态见 [docs/项目状态.md](docs/项目状态.md)，完整需求见 [PRD-IfPlay-MVP-v1.0.md](PRD-IfPlay-MVP-v1.0.md)。
 
@@ -60,6 +61,8 @@ npm start
 玩法策划接口为 `POST /api/projects/:id/planning`。第一次调用会返回一个关键问题或三个玩法提案；存在待回答问题时，在请求体中提交 `{ "answer": "用户回答" }`。`GET /api/projects/:id/planning` 可以恢复已保存的问答与提案。两个接口都需要项目凭证。
 
 提案选择接口为 `POST /api/projects/:id/planning/selection`，请求体为 `{ "proposalId": "proposal-a" }`。选择会写入项目状态并在刷新后恢复。
+
+确认玩法后，`POST /api/projects/:id/planning/style-board` 会调用万相生成一张三分区参考风格板。图片通过带项目凭证的 `GET /api/projects/:id/planning/style-board/image` 读取，不依赖供应商的 24 小时临时地址。视觉选择写入 `POST /api/projects/:id/planning/style-selection`，请求体为 `{ "styleId": "style-a" }`。最后调用 `POST /api/projects/:id/planning/contract/confirm` 确认玩法合同；未确认合同的策划项目不能启动首版生成。
 
 需要验证真实 OpenGame 时，先初始化子模块并安装上游依赖：
 
