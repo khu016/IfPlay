@@ -17,6 +17,7 @@
         <span class="service-state__dot" aria-hidden="true"></span>
         <span>正在连接</span>
       </div>
+      <button class="text-action nav-home-action" id="home-button" type="button" hidden>返回首页</button>
     </header>
 
     <section class="invite-gate" id="invite-gate" hidden aria-labelledby="invite-title">
@@ -33,7 +34,62 @@
       </div>
     </section>
 
-    <main class="workbench" id="app-shell">
+    <main class="creator-home" id="home-shell" hidden>
+      <aside class="conversation-rail" aria-labelledby="conversation-title">
+        <div class="conversation-rail__head">
+          <div>
+            <p class="mode-label">创作记录</p>
+            <h2 id="conversation-title">最近对话</h2>
+          </div>
+          <button class="new-chat-button" id="new-chat-button" type="button" aria-label="开始新对话">＋</button>
+        </div>
+        <nav class="conversation-list" id="conversation-list" aria-label="历史对话"></nav>
+        <p class="conversation-empty" id="conversation-empty">还没有历史对话。<br />从右边说出第一个想法吧。</p>
+      </aside>
+
+      <section class="home-stage">
+        <div class="home-hero reveal" style="--i: 0">
+          <p class="mode-label">把灵感变成可以玩的东西</p>
+          <h1>今天想做<br />什么游戏？</h1>
+          <p class="lede">先说一个模糊的念头也可以。AI 会陪你确认玩法、规则和画面，再开始制作。</p>
+          <form class="home-composer" id="home-idea-form" novalidate>
+            <label class="visually-hidden" for="home-idea">告诉 AI 你的游戏想法</label>
+            <textarea
+              id="home-idea"
+              rows="3"
+              minlength="4"
+              maxlength="2000"
+              placeholder="描述你想玩的游戏……"
+              required
+            ></textarea>
+            <div class="home-composer__foot">
+              <span id="home-idea-help">题材、角色或一个画面，都可以作为开始</span>
+              <button class="composer-send" id="home-create-button" type="submit" aria-label="发送想法并开始创作">
+                <span aria-hidden="true">↗</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <section class="game-library reveal" style="--i: 1" aria-labelledby="game-library-title">
+          <header class="game-library__head">
+            <div>
+              <p class="mode-label">你的作品</p>
+              <h2 id="game-library-title">已经做好的游戏</h2>
+            </div>
+            <span id="game-count">0 个游戏</span>
+          </header>
+          <div class="game-grid" id="game-grid"></div>
+          <button class="empty-library" id="empty-library" type="button">
+            <span class="empty-library__mark" aria-hidden="true"><i></i><i></i><i></i></span>
+            <strong>第一个游戏还在等你</strong>
+            <small>从上面的对话框开始，生成后会出现在这里。</small>
+          </button>
+        </section>
+      </section>
+    </main>
+
+    <main class="workbench" id="app-shell" hidden>
       <section class="brief-pane reveal" style="--i: 0" aria-labelledby="page-title">
         <div class="brief-pane__intro">
           <p class="mode-label">游戏创作台</p>

@@ -1,13 +1,26 @@
 const storageKey = 'ifplay.project';
 const betaStorageKey = 'ifplay.beta';
+const libraryStorageKey = 'ifplay.library';
 
 const elements = {
   serviceState: document.querySelector('#service-state'),
+  homeButton: document.querySelector('#home-button'),
   inviteGate: document.querySelector('#invite-gate'),
   inviteForm: document.querySelector('#invite-form'),
   inviteCode: document.querySelector('#invite-code'),
   inviteButton: document.querySelector('#invite-button'),
   inviteMessage: document.querySelector('#invite-message'),
+  homeShell: document.querySelector('#home-shell'),
+  homeIdeaForm: document.querySelector('#home-idea-form'),
+  homeIdea: document.querySelector('#home-idea'),
+  homeIdeaHelp: document.querySelector('#home-idea-help'),
+  homeCreateButton: document.querySelector('#home-create-button'),
+  newChatButton: document.querySelector('#new-chat-button'),
+  conversationList: document.querySelector('#conversation-list'),
+  conversationEmpty: document.querySelector('#conversation-empty'),
+  gameGrid: document.querySelector('#game-grid'),
+  gameCount: document.querySelector('#game-count'),
+  emptyLibrary: document.querySelector('#empty-library'),
   appShell: document.querySelector('#app-shell'),
   appFooter: document.querySelector('#app-footer'),
   ideaForm: document.querySelector('#idea-form'),
@@ -117,6 +130,102 @@ function loadSession() {
 function saveSession(value) {
   session = value;
   localStorage.setItem(storageKey, JSON.stringify(value));
+}
+
+function loadLibrary() {
+  try {
+    const value = JSON.parse(localStorage.getItem(libraryStorageKey));
+    return Array.isArray(value) ? value : [];
+  } catch {
+    localStorage.removeItem(libraryStorageKey);
+    return [];
+  }
+}
+
+function saveLibrary(value) {
+  localStorage.setItem(libraryStorageKey, JSON.stringify(value.slice(0, 30)));
+}
+
+function rememberProject(project, projectSession = session) {
+  if (!project?.id || !projectSession?.token) return;
+  const library = loadLibrary();
+  const previous = library.find((item) => item.projectId === project.id);
+  const entry = {
+    projectId: project.id,
+    token: projectSession.token,
+    idea: project.idea,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt ?? new Date().toISOString(),
+    currentVersionId: project.currentVersionId ?? null,
+    versionNumber: currentVersions.find((version) => version.isCurrent)?.number ?? previous?.versionNumber ?? null,
+  };
+  saveLibrary([entry, ...library.filter((item) => item.projectId !== project.id)]);
+}
+
+function relativeDate(value) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '最近';
+  const elapsed = Date.now() - timestamp;
+  if (elapsed < 60_000) return '刚刚';
+  if (elapsed < 3_600_000) return `${Math.max(1, Math.floor(elapsed / 60_000))} 分钟前`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} 小时前`;
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(timestamp);
+}
+
+function libraryTitle(idea) {
+  const clean = String(idea ?? '').replace(/\s+/g, ' ').trim();
+  return clean.length > 28 ? `${clean.slice(0, 28)}…` : clean;
+}
+
+async function openLibraryProject(entry) {
+  saveSession({ projectId: entry.projectId, token: entry.token });
+  showWorkbench();
+  clearMessage();
+  await restoreProject();
+}
+
+function renderHome() {
+  const library = loadLibrary().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  elements.conversationList.replaceChildren();
+  elements.conversationEmpty.hidden = library.length > 0;
+  library.forEach((entry) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'conversation-item';
+    button.setAttribute('aria-label', `继续对话：${entry.idea}`);
+    const title = document.createElement('strong');
+    title.textContent = libraryTitle(entry.idea);
+    const meta = document.createElement('span');
+    meta.textContent = entry.currentVersionId ? `可试玩 · ${relativeDate(entry.updatedAt)}` : `创作中 · ${relativeDate(entry.updatedAt)}`;
+    button.append(title, meta);
+    button.addEventListener('click', () => openLibraryProject(entry));
+    elements.conversationList.append(button);
+  });
+
+  const games = library.filter((entry) => entry.currentVersionId);
+  elements.gameGrid.replaceChildren();
+  elements.gameCount.textContent = `${games.length} 个游戏`;
+  elements.emptyLibrary.hidden = games.length > 0;
+  games.forEach((entry, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'game-card';
+    button.dataset.color = String((index % 3) + 1);
+    const art = document.createElement('span');
+    art.className = 'game-card__art';
+    art.setAttribute('aria-hidden', 'true');
+    art.innerHTML = '<i></i><i></i><i></i><i></i>';
+    const body = document.createElement('span');
+    body.className = 'game-card__body';
+    const title = document.createElement('strong');
+    title.textContent = libraryTitle(entry.idea);
+    const meta = document.createElement('small');
+    meta.textContent = `v${entry.versionNumber ?? 1} · ${relativeDate(entry.updatedAt)}`;
+    body.append(title, meta);
+    button.append(art, body);
+    button.addEventListener('click', () => openLibraryProject(entry));
+    elements.gameGrid.append(button);
+  });
 }
 
 function loadBetaSession() {
@@ -761,12 +870,13 @@ async function loadPlayableVersion(versionId = null, { keepHistory = false } = {
     elements.returnCurrentButton.hidden = !historical;
     elements.versionStrip.hidden = false;
   }
+  const { project } = await api(`/api/projects/${session.projectId}`);
+  currentProject = project;
+  rememberProject(project);
   if (keepHistory || historical) {
     showVersionHistory();
   } else {
     elements.modifyPanel.hidden = false;
-    const { project } = await api(`/api/projects/${session.projectId}`);
-    currentProject = project;
     const pendingPlan = project.pendingChangePlan;
     if (pendingPlan?.status === 'awaiting_confirmation') {
       elements.instruction.value = pendingPlan.feedback;
@@ -802,6 +912,7 @@ async function restoreProject() {
   try {
     const { project } = await api(`/api/projects/${session.projectId}`);
     currentProject = project;
+    rememberProject(project);
     elements.idea.value = project.idea;
     if (project.currentVersionId) {
       await loadPlayableVersion();
@@ -836,21 +947,34 @@ async function checkService() {
 
 function showInviteGate(message = '') {
   elements.inviteGate.hidden = false;
+  elements.homeShell.hidden = true;
   elements.appShell.hidden = true;
   elements.appFooter.hidden = true;
+  elements.homeButton.hidden = true;
   elements.inviteMessage.hidden = !message;
   elements.inviteMessage.textContent = message;
 }
 
-function showApp() {
+function showHome() {
   elements.inviteGate.hidden = true;
+  elements.homeShell.hidden = false;
+  elements.appShell.hidden = true;
+  elements.appFooter.hidden = false;
+  elements.homeButton.hidden = true;
+  renderHome();
+}
+
+function showWorkbench() {
+  elements.inviteGate.hidden = true;
+  elements.homeShell.hidden = true;
   elements.appShell.hidden = false;
   elements.appFooter.hidden = false;
+  elements.homeButton.hidden = false;
 }
 
 async function ensureBetaAccess(health) {
   if (!health?.beta?.enabled) {
-    showApp();
+    showHome();
     return true;
   }
   if (!betaSession?.token) {
@@ -861,7 +985,7 @@ async function ensureBetaAccess(health) {
     const { tester } = await api('/api/beta/session');
     betaSession.tester = tester;
     saveBetaSession(betaSession);
-    showApp();
+    showHome();
     return true;
   } catch {
     localStorage.removeItem(betaStorageKey);
@@ -870,6 +994,64 @@ async function ensureBetaAccess(health) {
     return false;
   }
 }
+
+function validateHomeIdea() {
+  const value = elements.homeIdea.value.trim();
+  const valid = value.length >= 4 && value.length <= 2000;
+  elements.homeIdea.setAttribute('aria-invalid', String(!valid));
+  elements.homeIdeaHelp.textContent = valid
+    ? '发送后会直接建立新对话'
+    : '至少写 4 个字，可以先写题材或玩家要做什么';
+  elements.homeIdeaHelp.dataset.state = valid ? 'ready' : 'error';
+  return valid;
+}
+
+async function createNewProject(idea, button) {
+  clearMessage();
+  setButtonState(button, 'loading');
+  try {
+    const created = await api('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify({ idea }),
+    });
+    currentProject = created.project;
+    currentPlanning = created.project.planning;
+    currentVersions = [];
+    selectedProposalId = null;
+    selectedStyleId = null;
+    saveSession({ projectId: created.project.id, token: created.token });
+    rememberProject(created.project);
+    elements.idea.value = idea;
+    elements.homeIdea.value = '';
+    showWorkbench();
+    await continuePlanning();
+    setButtonState(button, 'success');
+  } catch (error) {
+    setButtonState(button, 'error');
+    showMessage(`${error.message} 检查后端连接后再试。`);
+    if (button === elements.homeCreateButton) {
+      elements.homeIdeaHelp.textContent = error.message;
+      elements.homeIdeaHelp.dataset.state = 'error';
+    }
+  }
+}
+
+elements.homeIdea.addEventListener('input', () => {
+  if (elements.homeIdea.getAttribute('aria-invalid')) validateHomeIdea();
+});
+
+elements.homeIdeaForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!validateHomeIdea()) {
+    elements.homeIdea.focus();
+    return;
+  }
+  await createNewProject(elements.homeIdea.value.trim(), elements.homeCreateButton);
+});
+
+elements.newChatButton.addEventListener('click', () => elements.homeIdea.focus());
+elements.emptyLibrary.addEventListener('click', () => elements.homeIdea.focus());
+elements.homeButton.addEventListener('click', showHome);
 
 elements.idea.addEventListener('blur', () => {
   ideaTouched = true;
@@ -887,8 +1069,7 @@ elements.inviteForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({ code }),
     });
     saveBetaSession(result);
-    showApp();
-    await restoreProject();
+    showHome();
   } catch (error) {
     elements.inviteMessage.textContent = error.message;
     elements.inviteMessage.hidden = false;
@@ -918,20 +1099,13 @@ elements.ideaForm.addEventListener('submit', async (event) => {
     return;
   }
   clearMessage();
+  const idea = elements.idea.value.trim();
+  if (!currentProject || currentProject.idea !== idea || currentProject.currentVersionId) {
+    await createNewProject(idea, elements.createButton);
+    return;
+  }
   setButtonState(elements.createButton, 'loading');
   try {
-    const idea = elements.idea.value.trim();
-    if (!currentProject || currentProject.idea !== idea || currentProject.currentVersionId) {
-      const created = await api('/api/projects', {
-        method: 'POST',
-        body: JSON.stringify({ idea }),
-      });
-      currentProject = created.project;
-      currentPlanning = created.project.planning;
-      selectedProposalId = null;
-      selectedStyleId = null;
-      saveSession({ projectId: created.project.id, token: created.token });
-    }
     await continuePlanning();
     setButtonState(elements.createButton, 'success');
   } catch (error) {
@@ -1146,4 +1320,4 @@ elements.returnCurrentButton.addEventListener('click', async () => {
 });
 
 const health = await checkService();
-if (await ensureBetaAccess(health)) await restoreProject();
+await ensureBetaAccess(health);

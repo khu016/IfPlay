@@ -16,12 +16,13 @@
       <section class="beta-login" id="admin-login">
         <p class="mode-label">管理员</p>
         <h1>查看内测进度。</h1>
-        <p class="lede">凭证只保存在当前标签页，关闭后需要重新输入。</p>
+        <p class="lede">这里需要填写 <code>adminToken</code>，不是发给测试用户的邀请码。凭证只保存在当前标签页，关闭后需要重新输入。</p>
         <form id="admin-form">
-          <label for="admin-token">后台凭证</label>
-          <input id="admin-token" type="password" autocomplete="off" required />
+          <label for="admin-token">管理员凭证（adminToken）</label>
+          <input id="admin-token" type="password" autocomplete="off" placeholder="请粘贴 beta-access.json 中的 adminToken" required />
           <button class="action action--primary" type="submit">打开后台</button>
         </form>
+        <p class="field-help">要使用邀请码进入产品？<a href="/">返回 IfPlay 首页</a></p>
         <p class="field-help" id="admin-message" role="alert" hidden></p>
       </section>
 
