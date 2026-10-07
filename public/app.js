@@ -62,6 +62,9 @@ const elements = {
   changePlanCost: document.querySelector('#change-plan-cost'),
   editFeedbackButton: document.querySelector('#edit-feedback-button'),
   confirmChangeButton: document.querySelector('#confirm-change-button'),
+  historyPanel: document.querySelector('#history-panel'),
+  historyList: document.querySelector('#history-list'),
+  closeHistoryButton: document.querySelector('#close-history-button'),
   message: document.querySelector('#message'),
   previewTitle: document.querySelector('#preview-title'),
   previewStage: document.querySelector('#preview-stage'),
@@ -72,6 +75,8 @@ const elements = {
   versionStrip: document.querySelector('#version-strip'),
   versionNumber: document.querySelector('#version-number'),
   generatorLabel: document.querySelector('#generator-label'),
+  historyButton: document.querySelector('#history-button'),
+  returnCurrentButton: document.querySelector('#return-current-button'),
 };
 
 let session = loadSession();
@@ -82,6 +87,8 @@ let selectedStyleId = null;
 let styleBoardObjectUrl = null;
 let selectedFeedbackCategory = 'custom';
 let currentChangePlan = null;
+let currentVersions = [];
+let displayedVersionId = null;
 let ideaTouched = false;
 
 function loadSession() {
@@ -156,6 +163,7 @@ function hideCreationPanels() {
   elements.questionPanel.hidden = true;
   elements.planCard.hidden = true;
   elements.modifyPanel.hidden = true;
+  elements.historyPanel.hidden = true;
 }
 
 function validateIdea() {
@@ -229,6 +237,80 @@ function contractFieldLabel(field) {
     failureCondition: '失败条件',
     visualDirection: '整体视觉方向',
   }[field] ?? field;
+}
+
+function formatVersionTime(value) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function versionCostLabel(version) {
+  if (version.costStatus === 'no_model_call') return '未调用模型 · ¥0';
+  if (version.costCny !== null) return `¥${version.costCny.toFixed(2)}`;
+  return '费用待账单核对';
+}
+
+function createVersionItem(version) {
+  const item = document.createElement('li');
+  item.className = 'history-item';
+  const number = document.createElement('span');
+  number.className = 'history-item__number';
+  number.textContent = `v${version.number}`;
+  const body = document.createElement('div');
+  body.className = 'history-item__body';
+  const top = document.createElement('div');
+  top.className = 'history-item__top';
+  const summary = document.createElement('p');
+  summary.className = 'history-item__summary';
+  summary.textContent = version.summary;
+  top.append(summary);
+  if (version.isCurrent) {
+    const badge = document.createElement('span');
+    badge.className = 'history-item__badge';
+    badge.textContent = '当前';
+    top.append(badge);
+  }
+  const meta = document.createElement('p');
+  meta.className = 'history-item__meta';
+  const testLabel = version.testStatus === 'not_recorded' ? '测试结果未单独记录' : version.testStatus;
+  meta.textContent = `${formatVersionTime(version.createdAt)} · ${testLabel} · ${versionCostLabel(version)}`;
+  const actions = document.createElement('div');
+  actions.className = 'history-item__actions';
+  const previewButton = document.createElement('button');
+  previewButton.className = 'text-action';
+  previewButton.type = 'button';
+  previewButton.textContent = displayedVersionId === version.id ? '正在预览' : '预览';
+  previewButton.disabled = displayedVersionId === version.id;
+  previewButton.addEventListener('click', () => loadPlayableVersion(version.id, { keepHistory: true }));
+  actions.append(previewButton);
+  if (!version.isCurrent) {
+    const restoreButton = document.createElement('button');
+    restoreButton.className = 'text-action';
+    restoreButton.type = 'button';
+    restoreButton.textContent = '恢复为新版本';
+    restoreButton.addEventListener('click', () => restoreVersion(version, restoreButton));
+    actions.append(restoreButton);
+  }
+  body.append(top, meta, actions);
+  item.append(number, body);
+  return item;
+}
+
+function renderVersionHistory() {
+  elements.historyList.replaceChildren();
+  [...currentVersions].reverse().forEach((version) => {
+    elements.historyList.append(createVersionItem(version));
+  });
+}
+
+function showVersionHistory() {
+  hideCreationPanels();
+  elements.historyPanel.hidden = false;
+  renderVersionHistory();
 }
 
 function showFeedbackComposer() {
@@ -615,40 +697,74 @@ async function pollTask(taskId) {
   }
 }
 
-async function loadPlayableVersion() {
-  const previewResponse = await fetch(`/api/projects/${session.projectId}/preview`, {
+async function loadPlayableVersion(versionId = null, { keepHistory = false } = {}) {
+  const previewPath = versionId
+    ? `/api/projects/${session.projectId}/versions/${versionId}/preview`
+    : `/api/projects/${session.projectId}/preview`;
+  const previewResponse = await fetch(previewPath, {
     headers: { 'x-project-token': session.token },
   });
   if (!previewResponse.ok) throw new Error('试玩内容暂时无法打开。请重新生成。');
   hideCreationPanels();
   hidePreviewFlowPanels();
   elements.previewStage.hidden = false;
-  elements.previewTitle.textContent = '你的游戏已经可以试玩';
   elements.gameFrame.hidden = false;
   elements.gameFrame.srcdoc = await previewResponse.text();
   elements.emptyPreview.hidden = true;
 
   const { versions } = await api(`/api/projects/${session.projectId}/versions`);
-  const current = versions.at(-1);
-  if (current) {
-    elements.versionNumber.textContent = `v${current.number}`;
+  currentVersions = versions;
+  const current = versions.find((version) => version.isCurrent);
+  const displayed = versionId ? versions.find((version) => version.id === versionId) : current;
+  displayedVersionId = displayed?.id ?? null;
+  const historical = Boolean(displayed && !displayed.isCurrent);
+  if (displayed) {
+    elements.previewTitle.textContent = historical
+      ? `正在预览 v${displayed.number}`
+      : '你的游戏已经可以试玩';
+    elements.versionNumber.textContent = `v${displayed.number}`;
     elements.generatorLabel.textContent =
-      current.generatorMode === 'demo' ? '开发演示 · 非真实 AI 生成' : 'OpenGame 生成';
+      historical
+        ? '历史预览 · 当前版本没有改变'
+        : displayed.generatorMode === 'demo'
+          ? '开发演示 · 非真实 AI 生成'
+          : 'OpenGame 生成';
+    elements.returnCurrentButton.hidden = !historical;
     elements.versionStrip.hidden = false;
   }
-  elements.modifyPanel.hidden = false;
-  const { project } = await api(`/api/projects/${session.projectId}`);
-  currentProject = project;
-  const pendingPlan = project.pendingChangePlan;
-  if (pendingPlan?.status === 'awaiting_confirmation') {
-    elements.instruction.value = pendingPlan.feedback;
-    selectedFeedbackCategory = pendingPlan.presetCategory ?? 'custom';
-    showChangePlan(pendingPlan);
+  if (keepHistory || historical) {
+    showVersionHistory();
   } else {
-    showFeedbackComposer();
-    if (pendingPlan?.status === 'failed') {
-      showMessage(`${pendingPlan.error?.message ?? '上一次修改没有完成。'} 原来的可玩版本仍然保留。`);
+    elements.modifyPanel.hidden = false;
+    const { project } = await api(`/api/projects/${session.projectId}`);
+    currentProject = project;
+    const pendingPlan = project.pendingChangePlan;
+    if (pendingPlan?.status === 'awaiting_confirmation') {
+      elements.instruction.value = pendingPlan.feedback;
+      selectedFeedbackCategory = pendingPlan.presetCategory ?? 'custom';
+      showChangePlan(pendingPlan);
+    } else {
+      showFeedbackComposer();
+      if (pendingPlan?.status === 'failed') {
+        showMessage(`${pendingPlan.error?.message ?? '上一次修改没有完成。'} 原来的可玩版本仍然保留。`);
+      }
     }
+  }
+}
+
+async function restoreVersion(version, button) {
+  clearMessage();
+  setButtonState(button, 'loading');
+  try {
+    await api(`/api/projects/${session.projectId}/versions/${version.id}/restore`, {
+      method: 'POST',
+      body: '{}',
+    });
+    await loadPlayableVersion(null, { keepHistory: true });
+    showMessage(`已把 v${version.number} 恢复为新的当前版本，没有调用模型。`);
+  } catch (error) {
+    setButtonState(button, 'error');
+    showMessage(`${error.message} 当前版本没有改变。`);
   }
 }
 
@@ -892,6 +1008,18 @@ elements.confirmChangeButton.addEventListener('click', async () => {
     showMessage(`${error.message} 原来的可玩版本仍然保留。`);
     showTask('failed', 'failed');
   }
+});
+
+elements.historyButton.addEventListener('click', () => {
+  showVersionHistory();
+});
+
+elements.closeHistoryButton.addEventListener('click', async () => {
+  await loadPlayableVersion();
+});
+
+elements.returnCurrentButton.addEventListener('click', async () => {
+  await loadPlayableVersion(null, { keepHistory: true });
 });
 
 await checkService();

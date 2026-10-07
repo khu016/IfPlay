@@ -162,6 +162,23 @@ export class ProjectStore {
     return safeProject;
   }
 
+  publicVersion(project, version) {
+    return {
+      id: version.id,
+      projectId: version.projectId,
+      number: version.number,
+      parentVersionId: version.parentVersionId,
+      summary: version.summary ?? (version.number === 1 ? '生成第一版' : '生成新版本'),
+      generatorMode: version.generatorMode,
+      restoredFromVersionId: version.restoredFromVersionId ?? null,
+      testStatus: version.testStatus ?? 'not_recorded',
+      costStatus: version.costStatus ?? 'unverified',
+      costCny: Number.isFinite(version.costCny) ? version.costCny : null,
+      isCurrent: project.currentVersionId === version.id,
+      createdAt: version.createdAt,
+    };
+  }
+
   getPlanning(projectId) {
     return this.getProject(projectId).planning;
   }
@@ -422,6 +439,7 @@ export class ProjectStore {
       startedAt: null,
       finishedAt: null,
       changePlanId: metadata.changePlanId ?? null,
+      summary: metadata.summary ?? null,
     };
     this.state.tasks[id] = task;
     const project = this.getProject(projectId);
@@ -458,6 +476,46 @@ export class ProjectStore {
     return this.state.versions[projectId] ?? [];
   }
 
+  getVersion(projectId, versionId) {
+    const version = this.listVersions(projectId).find((item) => item.id === versionId);
+    if (!version) throw new AppError('VERSION_NOT_FOUND', '游戏版本不存在。', 404);
+    return version;
+  }
+
+  async restoreVersion(projectId, versionId) {
+    const project = this.getProject(projectId);
+    const target = this.getVersion(projectId, versionId);
+    const versions = this.listVersions(projectId);
+    const current = versions.find((item) => item.id === project.currentVersionId);
+    if (current?.outputPath === target.outputPath) {
+      throw new AppError('VERSION_ALREADY_CURRENT', '这个版本已经是当前试玩内容。', 409);
+    }
+    const createdAt = now();
+    const restored = {
+      id: randomUUID(),
+      projectId,
+      number: project.nextVersionNumber ?? versions.length + 1,
+      parentVersionId: project.currentVersionId,
+      instruction: `恢复自 v${target.number}`,
+      summary: `恢复到 v${target.number}：${target.summary ?? '历史可玩版本'}`,
+      generatorMode: target.generatorMode,
+      outputPath: target.outputPath,
+      restoredFromVersionId: target.id,
+      testStatus: target.testStatus ?? 'not_recorded',
+      costStatus: 'no_model_call',
+      costCny: 0,
+      createdAt,
+    };
+    versions.push(restored);
+    this.state.versions[projectId] = versions.slice(-10);
+    project.nextVersionNumber = restored.number + 1;
+    project.currentVersionId = restored.id;
+    project.status = 'playable';
+    project.updatedAt = createdAt;
+    await this.persist();
+    return restored;
+  }
+
   async completeTask(taskId, output) {
     const task = this.getTask(taskId);
     const project = this.getProject(task.projectId);
@@ -468,8 +526,13 @@ export class ProjectStore {
       number: project.nextVersionNumber ?? versions.length + 1,
       parentVersionId: project.currentVersionId,
       instruction: task.instruction,
+      summary: task.summary ?? (task.kind === 'initial' ? '生成第一版' : '生成新版本'),
       generatorMode: output.generatorMode,
       outputPath: output.outputPath,
+      restoredFromVersionId: null,
+      testStatus: 'not_recorded',
+      costStatus: 'unverified',
+      costCny: null,
       createdAt: now(),
     };
     versions.push(version);

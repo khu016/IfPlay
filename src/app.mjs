@@ -429,7 +429,7 @@ export async function createIfPlayApp(options = {}) {
           project.id,
           'modify',
           changePlanInstruction(plan),
-          { changePlanId: plan.id },
+          { changePlanId: plan.id, summary: plan.summary },
         );
         queue.add(task);
         return sendJson(response, 202, { task, plan });
@@ -453,15 +453,46 @@ export async function createIfPlayApp(options = {}) {
           throw new AppError('INSTRUCTION_INVALID', '生成要求需要 2 到 2000 个字符。');
         }
         const kind = project.currentVersionId ? 'modify' : 'initial';
-        const task = await store.createTask(project.id, kind, instruction);
+        const task = await store.createTask(project.id, kind, instruction, {
+          summary: kind === 'initial' ? '生成第一版' : instruction.slice(0, 120),
+        });
         queue.add(task);
         return sendJson(response, 202, { task });
       }
 
       const versionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/versions$/);
       if (request.method === 'GET' && versionsMatch) {
-        store.authorizeProject(versionsMatch[1], token(request));
-        return sendJson(response, 200, { versions: store.listVersions(versionsMatch[1]) });
+        const project = store.authorizeProject(versionsMatch[1], token(request));
+        const versions = store.listVersions(project.id).map((version) =>
+          store.publicVersion(project, version),
+        );
+        return sendJson(response, 200, { versions });
+      }
+
+      const versionPreviewMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/versions\/([^/]+)\/preview$/,
+      );
+      if (request.method === 'GET' && versionPreviewMatch) {
+        const project = store.authorizeProject(versionPreviewMatch[1], token(request));
+        const version = store.getVersion(project.id, versionPreviewMatch[2]);
+        const html = await buildPreviewHtml(version.outputPath);
+        response.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'private, no-store',
+        });
+        return response.end(html);
+      }
+
+      const versionRestoreMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/versions\/([^/]+)\/restore$/,
+      );
+      if (request.method === 'POST' && versionRestoreMatch) {
+        const project = store.authorizeProject(versionRestoreMatch[1], token(request));
+        if (store.hasActiveTask(project.id)) {
+          throw new AppError('PROJECT_BUSY', '当前项目正在生成，完成后才能恢复版本。', 409);
+        }
+        const version = await store.restoreVersion(project.id, versionRestoreMatch[2]);
+        return sendJson(response, 201, { version: store.publicVersion(project, version) });
       }
 
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
@@ -474,7 +505,9 @@ export async function createIfPlayApp(options = {}) {
       const previewMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/preview$/);
       if (request.method === 'GET' && previewMatch) {
         const project = store.authorizeProject(previewMatch[1], token(request));
-        const version = store.listVersions(project.id).find((item) => item.id === project.currentVersionId);
+        const version = project.currentVersionId
+          ? store.getVersion(project.id, project.currentVersionId)
+          : null;
         if (!version) throw new AppError('VERSION_NOT_READY', '项目还没有可试玩版本。', 409);
         const html = await buildPreviewHtml(version.outputPath);
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });

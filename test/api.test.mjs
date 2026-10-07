@@ -417,6 +417,74 @@ test('creates a project, generates a playable version, and modifies it', async (
   const versions = await versionsResponse.json();
   assert.equal(versions.versions.length, 2);
   assert.equal(versions.versions[1].parentVersionId, versions.versions[0].id);
+  assert.equal(Object.hasOwn(versions.versions[0], 'outputPath'), false);
+});
+
+test('previews a retained version and restores it without a model task', async (t) => {
+  const app = await startApp();
+  t.after(() => app.server.close());
+  const created = await app.store.createProject('测试历史版本恢复');
+  const firstDir = path.join(app.store.dataDir, 'restore-v1');
+  const secondDir = path.join(app.store.dataDir, 'restore-v2');
+  await mkdir(firstDir, { recursive: true });
+  await mkdir(secondDir, { recursive: true });
+  await writeFile(path.join(firstDir, 'index.html'), '<h1>历史版本一</h1>');
+  await writeFile(path.join(secondDir, 'index.html'), '<h1>当前版本二</h1>');
+  const firstTask = await app.store.createTask(
+    created.project.id,
+    'initial',
+    '生成第一版',
+    { summary: '生成第一版' },
+  );
+  const firstVersion = await app.store.completeTask(firstTask.id, {
+    generatorMode: 'demo',
+    outputPath: path.join(firstDir, 'index.html'),
+  });
+  const secondTask = await app.store.createTask(
+    created.project.id,
+    'modify',
+    '让节奏更快',
+    { summary: '让节奏更快' },
+  );
+  await app.store.completeTask(secondTask.id, {
+    generatorMode: 'demo',
+    outputPath: path.join(secondDir, 'index.html'),
+  });
+  const headers = { 'content-type': 'application/json', 'x-project-token': created.token };
+  const taskCount = Object.keys(app.store.state.tasks).length;
+
+  const historicalPreview = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/versions/${firstVersion.id}/preview`,
+    { headers },
+  );
+  assert.equal(historicalPreview.status, 200);
+  assert.match(await historicalPreview.text(), /历史版本一/);
+
+  const restoreResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/versions/${firstVersion.id}/restore`,
+    { method: 'POST', headers, body: '{}' },
+  );
+  const restored = await restoreResponse.json();
+  assert.equal(restoreResponse.status, 201);
+  assert.equal(restored.version.number, 3);
+  assert.equal(restored.version.restoredFromVersionId, firstVersion.id);
+  assert.equal(restored.version.costStatus, 'no_model_call');
+  assert.equal(restored.version.costCny, 0);
+  assert.equal(restored.version.isCurrent, true);
+  assert.equal(Object.keys(app.store.state.tasks).length, taskCount);
+
+  const currentPreview = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/preview`,
+    { headers },
+  );
+  assert.match(await currentPreview.text(), /历史版本一/);
+  const versionsResponse = await fetch(
+    `${app.baseUrl}/api/projects/${created.project.id}/versions`,
+    { headers },
+  );
+  const versions = (await versionsResponse.json()).versions;
+  assert.equal(versions.length, 3);
+  assert.equal(versions.some((version) => Object.hasOwn(version, 'outputPath')), false);
 });
 
 test('returns typed errors and protects project access', async (t) => {

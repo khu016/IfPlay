@@ -146,6 +146,17 @@
           </section>
         </section>
 
+        <section class="history-panel" id="history-panel" hidden aria-labelledby="history-title">
+          <div class="history-panel__head">
+            <div>
+              <h2 id="history-title">版本记录</h2>
+              <p>可以先预览旧版本，再恢复为一个新版本。恢复不会调用 AI，也不会覆盖历史。</p>
+            </div>
+            <button class="text-action" id="close-history-button" type="button">返回调整</button>
+          </div>
+          <ol class="history-list" id="history-list"></ol>
+        </section>
+
         <div class="message" id="message" role="alert" hidden></div>
       </section>
 
@@ -236,6 +247,8 @@
           <span>当前版本</span>
           <strong id="version-number">v1</strong>
           <span id="generator-label">开发演示</span>
+          <button class="text-action" id="return-current-button" type="button" hidden>返回当前版本</button>
+          <button class="text-action" id="history-button" type="button">版本记录</button>
         </div>
       </section>
     </main>
