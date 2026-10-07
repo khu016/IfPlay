@@ -3,7 +3,6 @@ const betaStorageKey = 'ifplay.beta';
 const libraryStorageKey = 'ifplay.library';
 
 const elements = {
-  serviceState: document.querySelector('#service-state'),
   homeButton: document.querySelector('#home-button'),
   inviteGate: document.querySelector('#invite-gate'),
   inviteForm: document.querySelector('#invite-form'),
@@ -18,6 +17,11 @@ const elements = {
   newChatButton: document.querySelector('#new-chat-button'),
   conversationList: document.querySelector('#conversation-list'),
   conversationEmpty: document.querySelector('#conversation-empty'),
+  railProfile: document.querySelector('#rail-profile'),
+  railProfileAvatar: document.querySelector('#rail-profile-avatar'),
+  railProfileIdentity: document.querySelector('#rail-profile-identity'),
+  railProfileQuota: document.querySelector('#rail-profile-quota'),
+  railProfileQuotaValue: document.querySelector('#rail-profile-quota-value'),
   gameGrid: document.querySelector('#game-grid'),
   gameCount: document.querySelector('#game-count'),
   emptyLibrary: document.querySelector('#empty-library'),
@@ -146,6 +150,31 @@ function saveLibrary(value) {
   localStorage.setItem(libraryStorageKey, JSON.stringify(value.slice(0, 30)));
 }
 
+function avatarLabel(value) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '访';
+  if (/^\d+$/.test(normalized)) return normalized.slice(0, 1);
+  return Array.from(normalized).slice(0, 2).join('').toUpperCase();
+}
+
+function renderRailProfile() {
+  const tester = betaSession?.tester;
+  if (!tester?.id) {
+    elements.railProfileAvatar.textContent = avatarLabel('本地访客');
+    elements.railProfileIdentity.textContent = '本地访客';
+    elements.railProfileIdentity.removeAttribute('title');
+    elements.railProfileQuota.hidden = true;
+    return;
+  }
+
+  const compactId = String(tester.id).replaceAll('-', '').slice(0, 10);
+  elements.railProfileAvatar.textContent = avatarLabel(compactId);
+  elements.railProfileIdentity.textContent = compactId;
+  elements.railProfileIdentity.title = String(tester.id);
+  elements.railProfileQuotaValue.textContent = String(tester.remainingProjects);
+  elements.railProfileQuota.hidden = !Number.isFinite(tester.remainingProjects);
+}
+
 function rememberProject(project, projectSession = session) {
   if (!project?.id || !projectSession?.token) return;
   const library = loadLibrary();
@@ -185,6 +214,7 @@ async function openLibraryProject(entry) {
 }
 
 function renderHome() {
+  renderRailProfile();
   const library = loadLibrary().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   elements.conversationList.replaceChildren();
   elements.conversationEmpty.hidden = library.length > 0;
@@ -933,14 +963,8 @@ async function restoreProject() {
 
 async function checkService() {
   try {
-    const health = await api('/api/health');
-    elements.serviceState.dataset.state = 'ready';
-    elements.serviceState.querySelector('span:last-child').textContent =
-      health.generatorMode === 'demo' ? '开发模式' : 'OpenGame 已连接';
-    return health;
+    return await api('/api/health');
   } catch {
-    elements.serviceState.dataset.state = 'error';
-    elements.serviceState.querySelector('span:last-child').textContent = '后端未连接';
     return null;
   }
 }
@@ -1076,6 +1100,14 @@ elements.inviteForm.addEventListener('submit', async (event) => {
   } finally {
     setButtonState(elements.inviteButton, 'idle');
   }
+});
+
+document.querySelectorAll('[data-game-example]').forEach((button) => {
+  button.addEventListener('click', () => {
+    elements.homeIdea.value = button.dataset.gameExample ?? '';
+    elements.homeIdea.dispatchEvent(new Event('input', { bubbles: true }));
+    elements.homeIdea.focus();
+  });
 });
 
 elements.idea.addEventListener('input', () => {

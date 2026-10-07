@@ -13,10 +13,6 @@
         <span class="wordmark__mark" aria-hidden="true"><i></i><i></i><i></i></span>
         IfPlay
       </a>
-      <div class="service-state" id="service-state" role="status">
-        <span class="service-state__dot" aria-hidden="true"></span>
-        <span>正在连接</span>
-      </div>
       <button class="text-action nav-home-action" id="home-button" type="button" hidden>返回首页</button>
     </header>
 
@@ -36,22 +32,37 @@
 
     <main class="creator-home" id="home-shell" hidden>
       <aside class="conversation-rail" aria-labelledby="conversation-title">
+        <a class="rail-brand" href="/" aria-label="IfPlay 首页">
+          <span class="wordmark__mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>IfPlay</span>
+        </a>
         <div class="conversation-rail__head">
           <div>
-            <p class="mode-label">创作记录</p>
             <h2 id="conversation-title">最近对话</h2>
           </div>
-          <button class="new-chat-button" id="new-chat-button" type="button" aria-label="开始新对话">＋</button>
+          <button class="new-chat-button" id="new-chat-button" type="button" aria-label="开始新对话">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14"></path>
+            </svg>
+          </button>
         </div>
         <nav class="conversation-list" id="conversation-list" aria-label="历史对话"></nav>
         <p class="conversation-empty" id="conversation-empty">还没有历史对话。<br />从右边说出第一个想法吧。</p>
+        <div class="rail-profile" id="rail-profile">
+          <span class="rail-profile__avatar" id="rail-profile-avatar" aria-hidden="true">访</span>
+          <span class="rail-profile__identity" id="rail-profile-identity">本地访客</span>
+          <span class="rail-profile__quota" id="rail-profile-quota" title="剩余可创建游戏数" hidden>
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+              <path d="m13.5 2-8 11h6l-1 9 8-12h-6l1-8Z"></path>
+            </svg>
+            <span id="rail-profile-quota-value">0</span>
+          </span>
+        </div>
       </aside>
 
       <section class="home-stage">
         <div class="home-hero reveal" style="--i: 0">
-          <p class="mode-label">把灵感变成可以玩的东西</p>
-          <h1>今天想做<br />什么游戏？</h1>
-          <p class="lede">先说一个模糊的念头也可以。AI 会陪你确认玩法、规则和画面，再开始制作。</p>
+          <h1>告诉 IfPlay 你想做的游戏</h1>
           <form class="home-composer" id="home-idea-form" novalidate>
             <label class="visually-hidden" for="home-idea">告诉 AI 你的游戏想法</label>
             <textarea
@@ -65,16 +76,22 @@
             <div class="home-composer__foot">
               <span id="home-idea-help">题材、角色或一个画面，都可以作为开始</span>
               <button class="composer-send" id="home-create-button" type="submit" aria-label="发送想法并开始创作">
-                <span aria-hidden="true">↗</span>
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                  <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path>
+                </svg>
               </button>
             </div>
           </form>
+          <div class="game-examples" aria-label="游戏灵感示例">
+            <button type="button" data-game-example="做一个会变色的贪吃蛇游戏">做一个会变色的贪吃蛇</button>
+            <button type="button" data-game-example="做一个双人抢金币游戏">做一个双人抢金币游戏</button>
+            <button type="button" data-game-example="做一个太空躲避游戏">做一个太空躲避游戏</button>
+          </div>
         </div>
 
         <section class="game-library reveal" style="--i: 1" aria-labelledby="game-library-title">
           <header class="game-library__head">
             <div>
-              <p class="mode-label">你的作品</p>
               <h2 id="game-library-title">已经做好的游戏</h2>
             </div>
             <span id="game-count">0 个游戏</span>
@@ -353,7 +370,6 @@
 
     <footer class="foot-line" id="app-footer">
       <p>邀请码内测 · 真实任务状态 · 最多同时生成 2 个游戏</p>
-      <a href="https://github.com/khu016/IfPlay" target="_blank" rel="noreferrer">查看源码</a>
     </footer>
 
     <script type="module" src="/app.js"></script>
